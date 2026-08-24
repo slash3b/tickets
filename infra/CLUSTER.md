@@ -399,12 +399,14 @@ VIRTUALIZATION - PROXMOX
     THE HOST freezes at once, with a real risk of corruption. Total allocation is
     deliberately kept UNDER the pool size so this cannot happen:
 
-      total allocated across all VM disks   334.51G
-      pool size                             337.86 GiB      no over-commit, by design
+      total allocated across all VM disks   260.00G
+      pool size                             337.86 GiB      ~78G of headroom
+      actual data in the pool               14.47%  (~49 GiB)
 
-    If a VM ever needs more disk, something else has to give it up first. Do not resize
-    past the pool. The stopped VMs are where the slack is: minikube (101) holds 30G plus
-    a 30G snapshot and a 12.5G state file, and templates 802 and 900 hold 15G each.
+    Do not allocate past the pool size. As of 2026-08-24 there is ~78G of headroom,
+    freed by deleting the minikube VM and the pihole LXC. The only remaining slack after
+    that is templates 802 and 900 at 15G each - and cloning either one CONSUMES
+    allocation rather than freeing it, so leave room if a fourth node is ever wanted.
 
   VMS - resized 2026-08-24
 
@@ -412,14 +414,16 @@ VIRTUALIZATION - PROXMOX
     800  k8s-ctrl-plane      6   12500M     40G
     801  k8s-node-1          4   14500M     95G
     803  k8s-node-2          4   14500M     95G
-    101  minikube            -    4094M     30G   stopped
     802  k8s-node-tpl        -    1024M     15G   stopped, template
     900  debian-template     -    1024M     15G   stopped, template
-    100  pihole              -        -      2G   stopped LXC, disk 97.7% FULL
 
-    RAM IS NEAR THE LIMIT: 41500M allocated to the three running guests against 45Gi on
-    the host, leaving ~3.5Gi for Proxmox itself. DO NOT START minikube (4094M) while the
-    cluster runs - that would leave the host nothing.
+    Deleted 2026-08-24: VM 101 minikube (30G disk, a 30G snapshot and a 12.5G state
+    file) and LXC 100 pihole (2G). Together they freed ~74G of allocation. There is no
+    longer a second Kubernetes on this host - minikube was unrelated to this cluster.
+
+    RAM: 41500M allocated to the three running guests against 45Gi on the host, leaving
+    ~3.5Gi for Proxmox itself. There is no headroom to run another guest alongside the
+    cluster.
 
   HOW THE RESIZE WAS DONE, and it is easier than expected
 
