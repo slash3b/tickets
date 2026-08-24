@@ -333,9 +333,12 @@ delivers code from git commit to running pod with no human step.
        shows only cert-manager. EXIT TEST PASSED: deleting the ingress controller
        deployment had it recreated in 10s, ready in 30s, with a new UID.
        See GITOPS in CLUSTER.md.
-  0.5  hello-service. A Go service that does nothing but serve /livez and /readyz and
-       emit one metric, one log line and one trace span. Full CI: commit -> image ->
-       ghcr.io -> tag bump -> Argo sync -> reachable via ingress.
+  0.5  hello-service                                            DONE 2026-08-24
+       Verified end to end: a push ran vet and race tests, built and pushed
+       ghcr.io/slash3b/tickets-hello, bumped the tag in deploy/ as commit c179dac,
+       and Argo rolled it out. https://hello.tickets.lan returns 200 with a
+       certificate that validates against the internal CA, and the request's log line
+       carries trace_id and span_id. Nothing applied by hand.
 
        REGISTRY IS ghcr.io, NOT DOCKER HUB. Actions injects GITHUB_TOKEN, so there is
        no registry credential to create, rotate or leak. More importantly Docker Hub
