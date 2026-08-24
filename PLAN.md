@@ -284,6 +284,37 @@ delivers code from git commit to running pod with no human step.
        All observability leftovers deleted - 2 PVCs, 13 orphan CRDs, 4 empty namespaces,
        3 unused helm repos, stale images on every node. See CLEANUP in CLUSTER.md.
   0.3  MetalLB + ingress-nginx + cert-manager ClusterIssuer.
+
+       LAN FACTS, confirmed 2026-08-24 from the router (TP-Link Archer AX50, 192.168.1.1):
+         DHCP pool        192.168.1.20 - 192.168.1.239, 120 minute leases
+         METALLB POOL     192.168.1.240 - 192.168.1.249     <- outside DHCP, no router
+                                                               change needed
+       Only ONE address is actually needed - ingress-nginx takes a single LoadBalancer IP
+       and every hostname routes behind it. The other nine are headroom.
+
+       DO NOT use the router's Address Reservation for the MetalLB range. That binds a
+       MAC to an IP, and in L2 mode a MetalLB service IP is answered by ONE node whose
+       ARP responsibility fails over to a different node - and a different MAC - when
+       that node dies. Keeping the range outside the DHCP pool is the whole requirement.
+
+       DNS. There is no local resolver: the router hands out 1.1.1.1 for both primary and
+       secondary, and the pihole LXC that would have served this was deleted 2026-08-24.
+       Something must resolve argocd.tickets.lan, signoz.tickets.lan and friends to the
+       MetalLB IP. Start with /etc/hosts on the workstation - zero infrastructure, fine
+       for one machine. Only reach for CoreDNS-behind-MetalLB or a rebuilt pihole if
+       maintaining that list becomes annoying.
+
+       ROUTER HOUSEKEEPING, noticed while confirming the above:
+         - reservation BC:24:11:42:55:4E -> .225 matches no existing VM. It is the
+           deleted minikube's leftover. Delete it.
+         - reservation raspberrypi3bplus -> .12 collides with the Proxmox host, which
+           holds .12 statically on vmbr0. Inert today because .12 is outside the DHCP
+           pool, but delete or repoint it.
+         - VERIFY k8s-ctrl-plane (BC:24:11:EF:4A:3A) is reserved at .116. All three node
+           IPs are INSIDE the DHCP pool with 120 minute leases, and .116 is baked into
+           kubeadm's certificates, every kubeconfig and etcd's peer URL. If that lease
+           ever moves, the cluster breaks in a way that looks like everything is down.
+
        EXIT TEST: a hostname on the LAN resolves to a cluster service over HTTPS.
   0.4  Argo CD app-of-apps, deploy/ tree laid out, everything from 0.3 moved INTO git and
        re-synced from there rather than left as a hand-applied install.
