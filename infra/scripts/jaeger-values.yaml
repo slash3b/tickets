@@ -1,0 +1,48 @@
+# Jaeger configuration for monitoring namespace
+fullnameOverride: "jaeger"
+
+# Configure all-in-one deployment
+allInOne:
+  enabled: true
+  image:
+    tag: "1.60.0"
+
+provisionDataStore:
+  cassandra: false
+
+# Storage configuration
+storage:
+  type: memory
+  # For production, use:
+  # type: elasticsearch
+  # elasticsearch:
+  #   host: elasticsearch.monitoring.svc.cluster.local
+  #   port: 9200
+
+# Enable ingress if you want external access
+ingress:
+  enabled: true
+  # enabled: true
+  # hosts:
+  #   - jaeger.your-domain.com
+
+# Resource limits
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 256m
+    memory: 256Mi
+
+# Service configuration
+query:
+  service:
+    type: ClusterIP
+    port: 16686
+
+agent:
+  service:
+    zipkinThriftPort: 5775
+    compactPort: 6831
+    binaryPort: 6832

@@ -1,0 +1,16 @@
+# IDE
+.idea/
+.vscode/
+
+# ctags
+tags
+
+# Go build output
+tmp/
+main
+*.out
+out.html
+
+# the reeldex org profile repo — its own repo with its own remote
+# (GitHub requires org profile READMEs to live in a standalone `.github` repo)
+/.github/

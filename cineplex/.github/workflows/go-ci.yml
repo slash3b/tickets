@@ -1,0 +1,38 @@
+name: go format && go test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  check-format-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Install gofumpt
+        run: |
+          GO111MODULE=on go install mvdan.cc/gofumpt@latest
+
+      - name: Check formatting with gofumpt
+        run: |
+          # List unformatted files, fail if any found
+          unformatted=$(gofumpt -l ./)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not formatted with gofumpt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Run unit tests
+        run: go test -v ./...

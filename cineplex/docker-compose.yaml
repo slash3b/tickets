@@ -1,0 +1,58 @@
+services:
+  cineplex:
+    build:
+      context: .
+    container_name: cineplex
+    environment:
+      - TIMEOUT=15
+      - DEBUG=true
+      - PORT=8081
+      - OTEL_SERVICE_NAME=cineplex
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=cineplex,service.version=0.1.0
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4318
+    ports:
+      - "8081:8081"
+    depends_on:
+      - collector
+
+  collector:
+    container_name: otel-collector
+    image: otel/opentelemetry-collector-contrib:latest
+    volumes:
+      - ./otelcol.yaml:/etc/otelcol-contrib/config.yaml
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    ports:
+      - "4317:4317"  # OTLP gRPC receiver
+      - "4318:4318"  # OTLP HTTP receiver
+      - "8889:8889"  # Prometheus metrics endpoint
+    depends_on:
+      - tempo
+
+  tempo:
+    container_name: tempo
+    image: grafana/tempo:latest
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml
+      - tempo-data:/var/tempo
+    ports:
+      - "3200:3200"  # Tempo HTTP
+      - "4317"       # OTLP gRPC (internal)
+      - "4318"       # OTLP HTTP (internal)
+
+  grafana:
+    container_name: grafana
+    image: grafana/grafana:latest
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+    volumes:
+      - ./grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml
+    ports:
+      - "3000:3000"
+    depends_on:
+      - tempo
+
+volumes:
+  tempo-data:
