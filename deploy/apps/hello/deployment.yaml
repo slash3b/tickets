@@ -20,7 +20,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: hello
-          image: slash3b/tickets-hello:latest   # CI rewrites this via kustomize
+          image: ghcr.io/slash3b/tickets-hello:latest   # CI rewrites this via kustomize
           imagePullPolicy: IfNotPresent
           ports:
             - {name: http, containerPort: 8080}

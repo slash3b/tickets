@@ -7,5 +7,5 @@ resources:
 # CI rewrites newTag here on every push to main. This line is the record of what
 # is actually deployed.
 images:
-  - name: slash3b/tickets-hello
+  - name: ghcr.io/slash3b/tickets-hello
     newTag: latest

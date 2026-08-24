@@ -333,9 +333,20 @@ delivers code from git commit to running pod with no human step.
        shows only cert-manager. EXIT TEST PASSED: deleting the ingress controller
        deployment had it recreated in 10s, ready in 30s, with a new UID.
        See GITOPS in CLUSTER.md.
-  0.5  hello-service. A Go service that does nothing but serve /healthz and emit one
-       metric, one log line and one trace span. Full CI: commit -> image -> Docker Hub ->
-       tag bump -> Argo sync -> reachable via ingress.
+  0.5  hello-service. A Go service that does nothing but serve /livez and /readyz and
+       emit one metric, one log line and one trace span. Full CI: commit -> image ->
+       ghcr.io -> tag bump -> Argo sync -> reachable via ingress.
+
+       REGISTRY IS ghcr.io, NOT DOCKER HUB. Actions injects GITHUB_TOKEN, so there is
+       no registry credential to create, rotate or leak. More importantly Docker Hub
+       rate-limits anonymous pulls per IP, and three cluster nodes behind one NAT
+       address is exactly the shape that trips it - it surfaces as ImagePullBackOff
+       with a toomanyrequests error, always at the worst moment.
+
+       GOTCHA: a newly pushed ghcr package is PRIVATE by default even from a public
+       repo. After the first successful build, go to the package and set
+       Package settings -> Change visibility -> Public, or the cluster gets
+       "unauthorized" and needs an imagePullSecret it should not need.
        EXIT TEST: change a string, push, and watch it reach the cluster untouched by hand.
        This is the single most valuable step in phase 0 and it is worth more than it
        looks - every later service is this service with logic added.
