@@ -413,6 +413,51 @@ TEARDOWN 2026-08-23 - CINEPLEX
   To make the removal permanent at the source, delete k8s/base from that repo.
 
 
+OBSERVABILITY - SIGNOZ, INSTALLED 2026-08-24
+--------------------------------------------
+
+  ns signoz, managed by Argo CD. Chart signoz/signoz 0.138.0.
+    signoz-0                            query service + UI, https://signoz.tickets.lan
+    signoz-otel-collector               OTLP ingest, :4317 grpc / :4318 http
+    chi-signoz-clickhouse-cluster-0-0-0 ClickHouse, the single store for all signals
+    signoz-zookeeper-0                  ClickHouse coordination
+    signoz-clickhouse-operator          manages the ClickHouseInstallation
+  postgresql, redpanda and signoz-otel-gateway are DISABLED - nothing needs them and
+  the gateway alone requests 2500m/2500Mi.
+
+  ClickHouse and ZooKeeper carry node affinity keeping them OFF the control plane.
+  Untainting it removed the only thing separating IO-heavy work from etcd, and
+  local-path makes the placement permanent once the PVC binds.
+
+  ENDPOINT FOR WORKLOADS - host:port, NO scheme, the OTLP HTTP exporter rejects one:
+    signoz-otel-collector.signoz.svc.cluster.local:4318
+
+  THE SETUP TRAP, and it cost real time. SigNoz will not configure its collector
+  until an ORGANISATION EXISTS, and an org is only created by registering the first
+  user in the UI. Until then:
+    - the server logs "cannot create agent without orgId" every 30 seconds
+    - the collector logs "Server returned an error response" from its OpAMP client
+    - the collector has NO receivers, so nothing listens on 4317/4318
+    - every client fails with "connection refused" to a Service that plainly exists
+  Nothing about those symptoms points at "you have not signed up yet". Check first:
+    curl -k https://signoz.tickets.lan/api/v1/version     -> {"setupCompleted":false}
+  The collector's OTLP pipeline is configuration delivered over OpAMP, not static
+  config, which is why an empty database disables data ingestion entirely.
+
+  ARGO CD PERMANENT OutOfSync, fixed with ignoreDifferences in
+  deploy/argocd/apps/signoz.yaml. Two server-side defaults the chart never renders:
+    volumeClaimTemplates[].apiVersion and .kind   on both StatefulSets
+    resourceFieldRef.divisor                      on the operator Deployment
+  Argo applied, re-detected the difference, burned five self-heal retries and parked
+  at OutOfSync - which destroys OutOfSync as a signal, so real drift becomes
+  invisible.
+  HOW TO DIAGNOSE THIS CLASS PROPERLY: read Argo's own comparison,
+    GET /api/v1/applications/<app>/managed-resources
+  and diff normalizedLiveState against predictedLiveState. Diffing `helm template`
+  output against the live object points at the WRONG fields, because it skips the
+  normalizers Argo applies first. That mistake cost an hour here.
+
+
 ACCESS LAYER - INSTALLED 2026-08-24
 -----------------------------------
 
