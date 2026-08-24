@@ -304,16 +304,25 @@ delivers code from git commit to running pod with no human step.
        for one machine. Only reach for CoreDNS-behind-MetalLB or a rebuilt pihole if
        maintaining that list becomes annoying.
 
-       ROUTER HOUSEKEEPING, noticed while confirming the above:
-         - reservation BC:24:11:42:55:4E -> .225 matches no existing VM. It is the
-           deleted minikube's leftover. Delete it.
-         - reservation raspberrypi3bplus -> .12 collides with the Proxmox host, which
-           holds .12 statically on vmbr0. Inert today because .12 is outside the DHCP
-           pool, but delete or repoint it.
-         - VERIFY k8s-ctrl-plane (BC:24:11:EF:4A:3A) is reserved at .116. All three node
-           IPs are INSIDE the DHCP pool with 120 minute leases, and .116 is baked into
-           kubeadm's certificates, every kubeconfig and etcd's peer URL. If that lease
-           ever moves, the cluster breaks in a way that looks like everything is down.
+       ALL THREE NODES ARE RESERVED, verified 2026-08-24. This matters more than it
+       looks: every node IP sits INSIDE the DHCP pool with 120 minute leases, and .116
+       is baked into kubeadm's certificates, every kubeconfig and etcd's peer URL. If
+       that lease ever moved, the cluster would break in a way that looks like total
+       failure rather than like DHCP.
+         k8s-ctrl-plane   BC:24:11:EF:4A:3A -> .116
+         k8s-node-1       BC:24:11:BA:13:02 -> .88
+         k8s-node-2       BC:24:11:6A:72:6C -> .24
+
+       ROUTER HOUSEKEEPING - three stale reservations, none blocking:
+         BC:24:11:42:55:4E -> .225   Proxmox OUI, matches no existing VM. Dead minikube.
+                                     The only one of the three that is IN the DHCP pool
+                                     and therefore actually reserving anything.
+         BC:24:11:C9:9D:E9 -> .19    Proxmox OUI, matches no VM. Named wiz_364264 from
+                                     stale DHCP hostname data. Outside the pool, inert.
+         BC:D0:74:18:5E:EE -> .13    Collides with the Proxmox host's vmbr1 static
+                                     address. Outside the pool, inert.
+       A reservation for an address outside the DHCP pool does nothing, which is why two
+       of these are harmless. Delete all three anyway - they are misleading to read.
 
        EXIT TEST: a hostname on the LAN resolves to a cluster service over HTTPS.
   0.4  Argo CD app-of-apps, deploy/ tree laid out, everything from 0.3 moved INTO git and
