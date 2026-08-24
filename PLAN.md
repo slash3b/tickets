@@ -1,4 +1,4 @@
-REELDEX - BUILD AND PLATFORM PLAN
+TICKETS - BUILD AND PLATFORM PLAN
 Draft 1, 2026-08-24. Companion to DESIGN.md.
 
 DESIGN.md says what the system is. This file says what has to exist on the cluster before

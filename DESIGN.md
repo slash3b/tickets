@@ -1,4 +1,4 @@
-REELDEX - TICKET SELLING SYSTEM - DESIGN
+TICKETS - TICKET SELLING SYSTEM - DESIGN
 Draft 1, 2026-08-24. Nothing here is built yet.
 
 This is a deliberately fake system built to be operated for real. Modelled on Juraj
@@ -619,7 +619,7 @@ DELIVERY
 
   git push
     -> GitHub Actions, matrix over changed services only
-    -> docker build, push to Docker Hub as slash3b/reeldex-<service>:<sha>
+    -> docker build, push to Docker Hub as slash3b/tickets-<service>:<sha>
     -> the tag in deploy/overlays/homelab is bumped
     -> Argo CD syncs
 

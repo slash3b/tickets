@@ -11,6 +11,7 @@ main
 *.out
 out.html
 
-# the reeldex org profile repo — its own repo with its own remote
-# (GitHub requires org profile READMEs to live in a standalone `.github` repo)
+# the `reeldex` GitHub org profile repo (an earlier name for this project) — its own
+# repo with its own remote. GitHub requires org profile READMEs to live in a standalone
+# repo literally named `.github`, so it cannot be folded into this monorepo.
 /.github/

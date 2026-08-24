@@ -1,8 +1,12 @@
-# reeldex
+# tickets
 
-Monorepo (`git@github.com:slash3b/tickets.git`). Everything lives in this one repo:
-`cineplex`, `infra`, `tpl`. The `.github/` directory is the separate reeldex org
-profile repo and is gitignored here.
+Monorepo (`git@github.com:slash3b/tickets.git`). A ticket-selling platform built to be
+operated for real on the homelab cluster — see `DESIGN.md` for the system and `PLAN.md`
+for what gets installed and in what order.
+
+Everything lives in this one repo: `cineplex`, `infra`, `tpl`. The `.github/` directory
+is a separate repo (the `reeldex` GitHub org profile, an earlier name for this project)
+and is gitignored here.
 
 ## infra/CLUSTER.md is the state file — keep it current
 
