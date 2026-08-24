@@ -27,9 +27,10 @@ spec:
           env:
             - {name: PORT,  value: "8080"}
             - {name: DEBUG, value: "false"}
-            # Empty until SigNoz exists in 0.6. obs.Setup treats an empty value as
-            # "record spans, export nothing", so the service runs either way.
-            - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: ""}
+            # host:port with NO scheme — the OTLP HTTP exporter rejects a scheme.
+            # Nothing in the service knows this is SigNoz; swapping the backend is
+            # a change to this one line.
+            - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "signoz-otel-collector.signoz.svc.cluster.local:4318"}
           resources:
             requests: {cpu: 10m, memory: 32Mi}
             limits:   {memory: 64Mi}
