@@ -1,0 +1,17 @@
+# MetalLB 0.16.1 — gives the cluster real LoadBalancer IPs on the LAN.
+# Before this, every exposed service was a NodePort on a random 30000-32767 port.
+controller:
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits:   {memory: 128Mi}
+speaker:
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits:   {memory: 128Mi}
+  # speaker answers ARP for service IPs and must run on every node, including the
+  # control plane — that node is untainted but keep the toleration so re-tainting
+  # it later does not silently break address advertisement.
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule

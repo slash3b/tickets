@@ -283,7 +283,9 @@ delivers code from git commit to running pod with no human step.
   0.2b clean slate                                               DONE 2026-08-24
        All observability leftovers deleted - 2 PVCs, 13 orphan CRDs, 4 empty namespaces,
        3 unused helm repos, stale images on every node. See CLEANUP in CLUSTER.md.
-  0.3  MetalLB + ingress-nginx + cert-manager ClusterIssuer.
+  0.3  MetalLB + ingress-nginx + cert-manager ClusterIssuer.   DONE 2026-08-24
+       Verified: https://argocd.tickets.lan returns 200 with a certificate that
+       validates against the internal CA. See ACCESS LAYER in CLUSTER.md.
 
        LAN FACTS, confirmed 2026-08-24 from the router (TP-Link Archer AX50, 192.168.1.1):
          DHCP pool        192.168.1.20 - 192.168.1.239, 120 minute leases

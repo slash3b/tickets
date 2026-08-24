@@ -1,0 +1,45 @@
+# Gives cert-manager something to do. It has been installed and completely inert
+# since 2025 — zero Issuers, zero Certificates — because the OpenTelemetry operator
+# that originally required it was removed.
+#
+# Three objects, in a chain:
+#   1. a self-signed issuer, used exactly once
+#   2. a CA certificate signed by it — the root of trust for *.tickets.lan
+#   3. a CA issuer that signs everything else using that certificate
+#
+# There is no public DNS and no Let's Encrypt here, so an internal CA is the only
+# option. Browsers will warn until this CA is imported into a trust store; the
+# certificate is in secret cert-manager/tickets-lan-ca, key ca.crt.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-bootstrap
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: tickets-lan-ca
+  namespace: cert-manager     # ClusterIssuer reads its CA secret from this namespace
+spec:
+  isCA: true
+  commonName: tickets.lan internal CA
+  secretName: tickets-lan-ca
+  duration: 87600h            # 10 years — this is a homelab root, not a public CA
+  renewBefore: 8760h          # renew a year out
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: selfsigned-bootstrap
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: tickets-lan-ca
+spec:
+  ca:
+    secretName: tickets-lan-ca

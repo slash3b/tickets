@@ -65,7 +65,9 @@ RUNNING SERVICES AND HOW TO REACH THEM
 
 Reachable from your LAN:
 
-  Argo CD web UI      http://192.168.1.116:31439      (also :31439 on 192.168.1.88 / .24)
+  Argo CD web UI      https://argocd.tickets.lan      preferred, needs /etc/hosts ->
+                                                      192.168.1.240 and the internal CA
+                      http://192.168.1.116:31439      (also :31439 on 192.168.1.88 / .24)
                       https://192.168.1.116:32640     self-signed cert, browser will warn
                       service argocd/argocd-server, NodePort, cluster port 80/443 -> pod 8080
                       login  slash3b    local account, role:admin, use this one
@@ -138,8 +140,8 @@ CLUSTER BUILD
 NAMESPACES
 ----------
 
-  argocd, cert-manager, default, kube-flannel, kube-node-lease, kube-public,
-  kube-system, local-path-storage
+  argocd, cert-manager, default, ingress-nginx, kube-flannel, kube-node-lease,
+  kube-public, kube-system, local-path-storage, metallb-system
 
   Every namespace here holds something. kubernetes-dashboard, logging, monitoring and
   tracing were deleted 2026-08-24 - see CLEANUP. The observability namespaces will come
@@ -379,6 +381,61 @@ TEARDOWN 2026-08-23 - CINEPLEX
     - the manifests in github.com/reeldex/cineplex.git under k8s/base
     - the published image slash3b/cineplex:v1.1.6 on Docker Hub
   To make the removal permanent at the source, delete k8s/base from that repo.
+
+
+ACCESS LAYER - INSTALLED 2026-08-24
+-----------------------------------
+
+  Before this the cluster had no Ingress controller and no LoadBalancer; everything
+  externally reachable was a NodePort on a random 30000-32767 port. That does not scale
+  past a couple of services.
+
+  MetalLB v0.16.1          ns metallb-system      helm, chart metallb/metallb
+                           Hands out real LoadBalancer IPs on the LAN in L2 mode.
+                           IPAddressPool lan-pool  192.168.1.240-192.168.1.249
+                           L2Advertisement lan
+                           Note 0.16.x installs frr-k8s alongside the speakers - that is
+                           the current default, not something we asked for.
+
+    THE POOL IS OUTSIDE THE ROUTER'S DHCP RANGE (.20-.239 on the TP-Link Archer AX50),
+    which is the entire requirement. Do NOT add these addresses to the router's Address
+    Reservation: that binds a MAC to an IP, and in L2 mode the node answering ARP for a
+    service IP - and therefore the MAC - changes on failover.
+
+    PING DOES NOT WORK against a MetalLB L2 address and that is normal. The speaker
+    answers ARP but the IP is not bound to any interface, so nothing replies to ICMP.
+    Test with curl, not ping. This will waste ten minutes of someone's life otherwise.
+
+  ingress-nginx 4.15.1     ns ingress-nginx       helm, chart ingress-nginx/ingress-nginx
+                           Single entry point, host-based routing, TLS termination.
+                           Service LoadBalancer, PINNED to 192.168.1.240 via annotation
+                           metallb.universe.tf/loadBalancerIPs - the address ends up in
+                           /etc/hosts everywhere, so it must not move.
+                           IngressClass nginx, marked default.
+                           1 replica. Raise to 2 once anything depends on it surviving a
+                           node reboot.
+
+  cert-manager             FINALLY HAS A JOB. It had been running with zero Issuers and
+                           zero Certificates since 2025.
+                           ClusterIssuer selfsigned-bootstrap   used exactly once
+                           Certificate cert-manager/tickets-lan-ca   the internal root,
+                             ECDSA P-256, 10 year duration
+                           ClusterIssuer tickets-lan-ca         signs everything else
+
+    Any Ingress gets a certificate by adding
+      cert-manager.io/cluster-issuer: tickets-lan-ca
+    and a tls: block. There is no public DNS and no Let's Encrypt here, so an internal
+    CA is the only option.
+
+    Browsers will warn until the CA is imported into a trust store. Extract it with:
+      kubectl -n cert-manager get secret tickets-lan-ca \
+        -o jsonpath='{.data.ca\.crt}' | base64 -d > tickets-lan-ca.crt
+
+  DNS - THERE IS NONE. The router serves 1.1.1.1 and the pihole LXC that would have done
+  local resolution was deleted 2026-08-24. Every machine that wants to reach a cluster
+  hostname needs an /etc/hosts entry pointing at 192.168.1.240:
+    192.168.1.240  argocd.tickets.lan signoz.tickets.lan
+  Revisit with CoreDNS behind MetalLB, or a rebuilt pihole, if that list gets annoying.
 
 
 VIRTUALIZATION - PROXMOX

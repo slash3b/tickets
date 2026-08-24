@@ -1,0 +1,27 @@
+# The LAN range MetalLB may hand out.
+#
+# 192.168.1.240-.249 sits OUTSIDE the router's DHCP pool (192.168.1.20-.239 on the
+# TP-Link Archer AX50), so the router will never lease these and there is no router
+# configuration to keep in sync.
+#
+# Do NOT add these to the router's Address Reservation. That binds a MAC to an IP,
+# and in L2 mode the node answering ARP for a service IP — and therefore the MAC —
+# changes on failover.
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: lan-pool
+  namespace: metallb-system
+spec:
+  addresses:
+    - 192.168.1.240-192.168.1.249
+  autoAssign: true
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: lan
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+    - lan-pool
