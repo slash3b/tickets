@@ -24,6 +24,34 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: signoz
+
+  # WHY THIS EXISTS. The SigNoz chart renders three fields as explicit empty
+  # strings. Those fields are `omitempty` in Kubernetes' Go structs, so the API
+  # server drops them on write and the live object can NEVER contain them. Argo
+  # therefore sees permanent drift, self-heals in a loop, burns its five retries
+  # and parks the app at OutOfSync forever:
+  #
+  #   Deployment/signoz-clickhouse-operator   .spec.template.spec.priorityClassName
+  #   StatefulSet/signoz                      .spec.template.spec.priorityClassName
+  #   StatefulSet/signoz-zookeeper            env ZOO_DATA_LOG_DIR .value
+  #
+  # The damage is not cosmetic: while this is unresolved, OutOfSync means nothing,
+  # so REAL drift is invisible. ServerSideDiff was tried first and did not settle
+  # it, so these are ignored explicitly. jqPathExpressions rather than jsonPointers
+  # because the env entry would otherwise need a brittle array index.
+  #
+  # Revisit on chart upgrades — if upstream stops emitting empty strings, delete
+  # this block rather than leaving it to mask something real later.
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jqPathExpressions:
+        - '.spec.template.spec.priorityClassName'
+    - group: apps
+      kind: StatefulSet
+      jqPathExpressions:
+        - '.spec.template.spec.priorityClassName'
+        - '.spec.template.spec.containers[].env[] | select(.name == "ZOO_DATA_LOG_DIR").value'
   syncPolicy:
     automated: {prune: true, selfHeal: true}
     syncOptions:
@@ -44,6 +72,9 @@ spec:
       # Better than ignoreDifferences path-by-path, which would need brittle
       # container/env array indices.
       - ServerSideDiff=true
+      # Without this, sync still APPLIES the ignored fields even though the diff
+      # ignores them — which re-creates the drift on every sync.
+      - RespectIgnoreDifferences=true
     # ClickHouse and its operator take a while to converge on first install.
     # NOTE: retry belongs under syncPolicy, NOT at spec level. Putting it at
     # spec.retry makes it an unknown field that the API server silently drops, so
