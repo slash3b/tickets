@@ -3,7 +3,8 @@ Snapshot 2026-08-24, taken from k8s-ctrl-plane (192.168.1.116).
 Changes made 2026-08-23/24: cineplex removed, slash3b account added, Argo CD 3.0.6 -> 3.5.1.
 2026-08-24: control-plane disk reclaimed, 83% -> 50%. Disk measured properly for the
 first time and the prune advice in ARGOCD UPGRADE was found to be wrong - see DISK.
-Worker SSH found broken, see ACCESS. No workload changes.
+Worker host keys verified out-of-band and known_hosts repaired, see ACCESS.
+No workload changes.
 
 
 ACCESS
@@ -17,24 +18,36 @@ ACCESS
                         export KUBECONFIG=~/.kube/homelab
   NodePort range      30000-32767 (default)
 
-  WORKER SSH IS BROKEN, found 2026-08-24. Neither worker can be reached from the
-  workstation or from the control plane, so any node-level work is control-plane-only
-  until this is fixed:
+  WORKER HOST KEYS - verified and repaired 2026-08-24.
 
-    k8s-node-1  192.168.1.88   Permission denied (publickey,password) from the control
-                               plane. No key trusted there. Fix by copying a key:
-                                 ssh-copy-id slash3b@192.168.1.88
+    k8s-node-1  192.168.1.88   ED25519 SHA256:XB3FdqqQrZLoBOQPyhBDLx3l/BJC9XhRb533hFQ2194
+    k8s-node-2  192.168.1.24   ED25519 SHA256:vnL6/8T/p5tSlHEaBg40OITWDzp28yiO4fobXnM5kpM
 
-    k8s-node-2  192.168.1.24   REMOTE HOST IDENTIFICATION HAS CHANGED. The control
-                               plane's known_hosts line 3 holds an ECDSA key; the host
-                               now presents ED25519
-                               SHA256:vnL6/8T/p5tSlHEaBg40OITWDzp28yiO4fobXnM5kpM
-                               VERIFY THIS IS A REBUILD BEFORE CLEARING IT - on a LAN
-                               homelab it almost certainly is, but confirm the
-                               fingerprint from the node's console rather than assuming:
-                                 ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
-                               then, only if it matches:
-                                 ssh-keygen -f ~/.ssh/known_hosts -R 192.168.1.24
+  The control plane's known_hosts had a stale ECDSA entry for .24 and SSH was reporting
+  REMOTE HOST IDENTIFICATION HAS CHANGED. It was not an attack - node-2 had been rebuilt
+  at some point and the entry was never updated. Both stale entries were removed and the
+  verified ED25519 keys added.
+
+  HOW THEY WERE VERIFIED, because this is the useful trick. Do not confirm a host key
+  over the same SSH connection you are trying to trust - that proves nothing. Read the
+  key off the node's own filesystem through a DIFFERENT channel, here the Kubernetes API:
+
+    kubectl run/apply a busybox Pod with nodeName: <node>, tolerations [{operator:
+    Exists}], and hostPath / mounted read-only at /host, whose command is
+      cat /host/etc/ssh/ssh_host_ed25519_key.pub
+    then kubectl logs it and pipe through ssh-keygen -lf -
+
+  Both nodes' on-disk keys matched what ssh-keyscan saw on the network, which is what
+  rules out a man in the middle. The pod is disposable; delete it afterwards.
+
+  KEY AUTH still needs the control-plane pubkey installed on both workers:
+    ssh-ed25519 AAAA...+tYb slash3b@gmail.com   (SHA256:gcgPtrJ4MMYnxpD7pMDxkof6EGOInW/XMJVO+xYPxEQ)
+  Install with, from the control plane:
+    ssh-copy-id slash3b@192.168.1.88
+    ssh-copy-id slash3b@192.168.1.24
+  Password auth is enabled on both workers and the account password is in your password
+  manager, not in this file. Once the key is installed, consider disabling password auth
+  on the workers entirely.
 
   Neither is urgent for capacity - both workers sit under 48% disk - but both block
   node-level work such as crictl pruning.
