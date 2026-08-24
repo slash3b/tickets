@@ -1,0 +1,38 @@
+# SigNoz. Wave 5: after the access layer and the cert-manager issuer, since its UI
+# ingress needs both.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: signoz
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - repoURL: https://charts.signoz.io
+      chart: signoz
+      targetRevision: 0.138.0
+      helm:
+        valueFiles:
+          - $values/deploy/platform/signoz/values.yaml
+    - repoURL: https://github.com/slash3b/tickets.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: signoz
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      # The chart ships CRDs (ClickHouse operator) that exceed the annotation size
+      # limit for client-side apply, the same trap the Argo CD 3.x upgrade hit.
+      - ServerSideApply=true
+  # ClickHouse and its operator take a while to converge on first install.
+  retry:
+    limit: 5
+    backoff: {duration: 30s, factor: 2, maxDuration: 5m}

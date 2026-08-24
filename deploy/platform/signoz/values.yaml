@@ -1,0 +1,76 @@
+# SigNoz — metrics, traces and logs in one ClickHouse, with APM screens built in.
+#
+# postgresql, redpanda and signoz-otel-gateway ship disabled by default and stay
+# that way: nothing here needs them, and the gateway alone requests 2500m/2500Mi.
+
+clickhouse:
+  enabled: true
+
+  # MUST NOT LAND ON THE CONTROL PLANE. The control plane was untainted in 0.0 to
+  # reclaim its RAM, which removed the only thing that kept IO-heavy workloads away
+  # from etcd. etcd wants fsync p99 under ~10ms; ClickHouse next to it produces a
+  # flaky API server that reads like a network fault. local-path storage makes the
+  # placement permanent once the PVC binds, so getting it right the first time is
+  # the whole game.
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: DoesNotExist
+
+  persistence:
+    enabled: true
+    size: 40Gi          # of ~110G free on a worker; retention is what really bounds this
+
+  resources:
+    requests: {cpu: 200m, memory: 1Gi}
+    limits:   {memory: 4Gi}
+
+  zookeeper:
+    # Required by the ClickHouse operator for coordination even at one shard,
+    # one replica. Not optional, and not the same thing as Kafka's old ZooKeeper.
+    enabled: true
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: node-role.kubernetes.io/control-plane
+                  operator: DoesNotExist
+    resources:
+      requests: {cpu: 50m, memory: 256Mi}
+      limits:   {memory: 512Mi}
+
+otelCollector:
+  # The OTLP ingest point. Services send here and know nothing about what is behind
+  # it — see pkg/obs. Endpoint for workloads:
+  #   signoz-otel-collector.signoz.svc.cluster.local:4318   (HTTP, no scheme)
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits:   {memory: 1Gi}
+
+signoz:
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits:   {memory: 1Gi}
+
+  persistence:
+    enabled: true
+    size: 2Gi
+
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: tickets-lan-ca
+    hosts:
+      - host: signoz.tickets.lan
+        paths:
+          - path: /
+            pathType: Prefix
+            port: 8080
+    tls:
+      - hosts: [signoz.tickets.lan]
+        secretName: signoz-tls
