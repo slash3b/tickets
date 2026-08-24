@@ -1,10 +1,10 @@
 HOMELAB KUBERNETES - STATE OF THE CLUSTER
 Snapshot 2026-08-24, taken from k8s-ctrl-plane (192.168.1.116).
 Changes made 2026-08-23/24: cineplex removed, slash3b account added, Argo CD 3.0.6 -> 3.5.1.
-2026-08-24: control-plane disk reclaimed, 83% -> 50%. Disk measured properly for the
-first time and the prune advice in ARGOCD UPGRADE was found to be wrong - see DISK.
-Worker host keys verified out-of-band, known_hosts repaired, key auth now working to
-both workers, see ACCESS. No workload changes.
+2026-08-24: CLEAN SLATE. All observability leftovers deleted - 2 PVCs, 13 CRDs, 4 empty
+namespaces, 3 helm repos, stale images on every node. Disk 83/50/43% -> 47/29/16%, ~30G
+free cluster-wide. Worker host keys verified out-of-band and key auth fixed. See CLEANUP,
+DISK and ACCESS. No change to anything that was actually running.
 
 
 ACCESS
@@ -138,8 +138,12 @@ CLUSTER BUILD
 NAMESPACES
 ----------
 
-  argocd, cert-manager, default, kube-flannel, kube-system, local-path-storage
-  kubernetes-dashboard, logging, monitoring, tracing   <- all four are EMPTY, see LEFTOVERS
+  argocd, cert-manager, default, kube-flannel, kube-node-lease, kube-public,
+  kube-system, local-path-storage
+
+  Every namespace here holds something. kubernetes-dashboard, logging, monitoring and
+  tracing were deleted 2026-08-24 - see CLEANUP. The observability namespaces will come
+  back when the new stack is installed, created by Argo CD rather than by hand.
 
 
 WHAT IS ACTUALLY RUNNING - AND WHY EACH PIECE IS THERE
@@ -225,16 +229,23 @@ CRDs
   argoproj.io                  applications, applicationsets, appprojects - in use
   cert-manager.io + acme       certificates, issuers, orders, challenges - installed but
                                ZERO objects exist, so cert-manager issues nothing today
-  configuration.konghq.com     12 Kong CRDs - orphaned, no Kong workload
-  jaegertracing.io/jaegers     orphaned, no Jaeger operator
+  Nine CRDs remain and all nine are backed by a running controller:
+    argoproj.io                applications, applicationsets, appprojects - Argo CD
+    cert-manager.io + acme     certificates, certificaterequests, issuers,
+                               clusterissuers, orders, challenges - cert-manager
+  The 12 Kong CRDs and jaegertracing.io/jaegers were deleted 2026-08-24 - see CLEANUP.
+  cert-manager's CRDs still have ZERO objects, so it continues to issue nothing until
+  the ingress work gives it a ClusterIssuer.
 
 Storage
   local-path (rancher.io/local-path) is the only StorageClass and is the default.
   Delete reclaim policy, WaitForFirstConsumer, no volume expansion.
   Node-local disk, so a PVC pins its pod to one node.
 
-    monitoring/storage-tempo-0        Bound, 5Gi        orphaned, Tempo is gone
-    logging/storage-loki-stack-0      Pending 377 days  orphaned, Loki is gone
+  There are now ZERO PersistentVolumeClaims and ZERO PersistentVolumes in the cluster.
+  The two orphans (monitoring/storage-tempo-0 bound 5Gi, logging/storage-loki-stack-0
+  pending 377 days) were deleted 2026-08-24 - see CLEANUP. The next PVC created will be
+  the first real one.
 
 
 GITOPS
@@ -463,17 +474,50 @@ DISK - MEASURED AND RECLAIMED 2026-08-24
   local-path storage means that placement is permanent once a PVC binds.
 
 
-LEFTOVERS
----------
+CLEANUP 2026-08-24 - CLEAN SLATE
+--------------------------------
 
-  The observability stack was torn out earlier; the shells remain:
-    - monitoring, logging, tracing, kubernetes-dashboard: namespaces with no workloads
-    - OTel collector, Tempo, Loki, Prometheus, Jaeger: all gone, no Helm releases, no pods
-    - two orphaned PVCs (above), Kong CRDs, Jaeger operator CRD
-    - cert-manager is healthy but has no issuers, so nothing uses it
+  Everything left behind by the old observability stack was removed. The cluster now
+  runs only things that are actually in use. Backups of every deleted object are on the
+  control plane in ~/cleanup-backup-2026-08-24/ (pvcs.yaml, pvs.yaml, namespaces.yaml,
+  crds.yaml, crd-names.txt), and the script that did it is ~/cleanup-2026-08-24.sh.
 
-  Warning events in the cluster are all from the VM boot shortly before this snapshot
-  (etcd/apiserver back-off, probe refusals, flannel cfg mount race) - transient, not faults.
+  Deleted:
+    PVCs        monitoring/storage-tempo-0        Bound 5Gi, Tempo long gone
+                logging/storage-loki-stack-0      Pending for 377 days, Loki long gone
+                Both PVs went with them - local-path reclaim policy is Delete.
+    CRDs        12 x configuration.konghq.com     no Kong workload had existed for a year
+                jaegers.jaegertracing.io          no Jaeger operator
+                All 13 verified to hold ZERO instances before deletion. This matters:
+                deleting a CRD CASCADES and destroys every object of that type, so the
+                zero-instance check is not optional.
+    Namespaces  kubernetes-dashboard, logging, monitoring, tracing - all empty
+    Helm repos  jaegertracing, kubernetes-dashboard, opentelemetry - nothing installed
+                from any of them. vm, grafana and jetstack were KEPT; the first two are
+                needed by the planned observability stack.
+    Images      crictl rmi --prune on all three nodes, plus apt-get clean on the workers.
+                Freed the stale Argo CD upgrade hops (v3.1.16, v3.2.12, v3.4.7), old dex
+                and redis tags, and a busybox left by the host-key verification pod.
+
+  Result - disk, before this session and after:
+
+    node             before   after    free
+    k8s-ctrl-plane   83%      47%      7.5G
+    k8s-node-1       50%      29%     10.4G
+    k8s-node-2       43%      16%     12.4G
+
+  30G free across the cluster, up from about 8G at the start of the day. Disk has gone
+  from the binding constraint on this project to a non-issue for the foreseeable future,
+  which changes the calculus on Kafka retention and on three-broker replication later.
+
+  Verified after: all 23 pods Running, all three nodes Ready, zero PVCs, zero PVs,
+  nine CRDs all backed by a live controller.
+
+  NOT deleted, deliberately:
+    - cert-manager, which is still inert with zero Issuers. It is about to get a job
+      issuing certificates for the ingress layer, so removing it would be churn.
+    - the argocd-upgrade-2026-08-23 and cineplex-teardown backups in ~ - those are
+      records, not dirt.
 
 
 REPO DRIFT
