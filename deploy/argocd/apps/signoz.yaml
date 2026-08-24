@@ -28,9 +28,9 @@ spec:
     automated: {prune: true, selfHeal: true}
     syncOptions:
       - CreateNamespace=true
-      - ServerSideApply=true
-      # The chart ships CRDs (ClickHouse operator) that exceed the annotation size
-      # limit for client-side apply, the same trap the Argo CD 3.x upgrade hit.
+      # ServerSideApply also matters because the chart ships ClickHouse operator
+      # CRDs large enough to exceed the 262144-byte annotation limit that
+      # client-side apply writes — the same trap the Argo CD 3.x upgrade hit.
       - ServerSideApply=true
   # ClickHouse and its operator take a while to converge on first install.
   retry:
