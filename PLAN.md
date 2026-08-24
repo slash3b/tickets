@@ -269,8 +269,10 @@ delivers code from git commit to running pod with no human step.
        so the pool can NEVER be over-committed. Deleting the minikube VM and the pihole
        LXC freed ~74G, ~50G of which went to the two workers. ~28G of headroom is left
        deliberately: cloning k8s-node-tpl for a fourth node would consume 15G of it.
-       REMAINING: untaint the control plane so its 12.5G of RAM is schedulable, keeping
-       ClickHouse, Kafka and Postgres off it by affinity.
+       Control plane untainted 2026-08-24, so all three nodes are schedulable: ~39.2Gi
+       allocatable and 14 cpu, up from ~27Gi on two nodes. This makes node affinity
+       MANDATORY on every stateful workload - ClickHouse, Kafka and Postgres must be
+       pinned to node-1 or node-2, because nothing else now keeps them off etcd's disk.
 
   0.1  disk reclaimed, all three nodes                           DONE 2026-08-24
        83/50/43% -> 47/29/16%, ~30G free cluster-wide. See DISK in CLUSTER.md.

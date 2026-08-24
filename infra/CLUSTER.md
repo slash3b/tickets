@@ -451,11 +451,11 @@ VIRTUALIZATION - PROXMOX
 
     Verified after: all three nodes Ready, zero pods not Running, /healthz ok.
 
-  SCHEDULING CONSTRAINT - THE CONTROL PLANE TAINT
+  SCHEDULING - CONTROL PLANE UNTAINTED 2026-08-24
 
-    k8s-ctrl-plane carries the kubeadm default taint
+    k8s-ctrl-plane CARRIED the kubeadm default taint
       node-role.kubernetes.io/control-plane:NoSchedule
-    so only node-1 and node-2 accept ordinary workloads. That is 29G of worker RAM, or
+    which meant only node-1 and node-2 accepted ordinary workloads. That is 29G of worker RAM, or
     ~26G after kubelet reserves, for a planned stack wanting ~25G. Roughly 96% committed
     with no room for a rolling update, while the control plane runs its own components
     in about 2G of its 12.5G and idles the rest.
@@ -479,7 +479,20 @@ VIRTUALIZATION - PROXMOX
       restore  kubectl taint nodes k8s-ctrl-plane \
                  node-role.kubernetes.io/control-plane=:NoSchedule
 
-    Fully reversible either way. NOT YET APPLIED as of this snapshot.
+    APPLIED 2026-08-24. All three nodes now schedulable, verified Ready with zero pods
+    disturbed and /healthz ok. Allocatable capacity afterwards:
+
+      k8s-ctrl-plane   12364512Ki  (~11.8Gi)   6 cpu
+      k8s-node-1       14380308Ki  (~13.7Gi)   4 cpu
+      k8s-node-2       14380308Ki  (~13.7Gi)   4 cpu
+      -----------------------------------------------
+      total            ~39.2Gi                14 cpu     was ~27Gi on two nodes
+
+    THE OBLIGATION THIS CREATES: nothing now stops a scheduler from putting ClickHouse
+    or a Kafka broker on the control plane. Every stateful workload MUST carry node
+    affinity keeping it on node-1 or node-2. If that discipline slips, the etcd IO
+    contention this taint existed to prevent comes back - and it will present as a flaky
+    API server, not as a storage problem.
 
   MISSING: there is no metrics-server. kubectl top and the Metrics API return
   "Metrics API not available", and no HorizontalPodAutoscaler can work without it.
