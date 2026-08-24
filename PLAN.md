@@ -24,15 +24,21 @@ cert-manager is the interesting one: it is already running and doing nothing. It
 being dead weight the moment the ingress layer below needs certificates, which is the
 first thing this plan does. Nothing new to install for it.
 
-RESOURCE BASELINE, measured 2026-08-24 after disk reclamation:
+RESOURCE BASELINE, measured 2026-08-24 after disk reclamation and cleanup:
 
-  node             disk free    memory
-  k8s-ctrl-plane   7.5G         7.7Gi
-  k8s-node-1       7.5G         7.6Gi
-  k8s-node-2       8.6G         5.7Gi   <- smaller, keep stateful workloads off it
+  node             disk used   disk free   memory
+  k8s-ctrl-plane   47%          7.5G       7.7Gi
+  k8s-node-1       29%         10.4G       7.6Gi
+  k8s-node-2       16%         12.4G       5.7Gi   <- most disk, least RAM
 
-  total usable     ~23G disk    ~21Gi memory, minus ~1.5Gi/node system overhead
-                                so call it ~17Gi schedulable
+  total usable     ~30G disk   ~21Gi memory, minus ~1.5Gi/node system overhead
+                               so call it ~17Gi schedulable
+
+  DISK IS NO LONGER THE BINDING CONSTRAINT. It was ~8G free cluster-wide at the start of
+  2026-08-24 and is ~30G now. MEMORY IS THE CONSTRAINT INSTEAD, and node-2 having 5.7Gi
+  against the other two nodes' 7.6Gi is the single fact that drives placement decisions
+  from here on. Kafka and Postgres both want page cache and both pin to a node via
+  local-path; neither belongs on node-2.
 
 
 PART 2 - WHAT MUST BE INSTALLED
@@ -212,11 +218,15 @@ PART 3 - PHASING
 PHASE 0 - PLATFORM. No business logic. Ends with a cluster that is fully observable and
 delivers code from git commit to running pod with no human step.
 
-  0.1  disk reclaimed on the control plane                       DONE 2026-08-24
-       83% -> 50%, 7.5G free. See DISK in CLUSTER.md.
-  0.2  worker SSH fixed. node-1 refuses key auth from the control plane; node-2's host
-       key has changed and needs verifying before it is accepted. Not urgent for capacity
-       - both workers sit under 48% - but needed before any node-level work.
+  0.1  disk reclaimed, all three nodes                           DONE 2026-08-24
+       83/50/43% -> 47/29/16%, ~30G free cluster-wide. See DISK in CLUSTER.md.
+  0.2  worker SSH fixed                                          DONE 2026-08-24
+       Host keys verified out-of-band via the Kubernetes API, known_hosts repaired, key
+       auth installed on both workers. Control plane is a working jump host.
+       REMAINING: password auth is still enabled on both workers and should be disabled.
+  0.2b clean slate                                               DONE 2026-08-24
+       All observability leftovers deleted - 2 PVCs, 13 orphan CRDs, 4 empty namespaces,
+       3 unused helm repos, stale images on every node. See CLEANUP in CLUSTER.md.
   0.3  MetalLB + ingress-nginx + cert-manager ClusterIssuer.
        EXIT TEST: a hostname on the LAN resolves to a cluster service over HTTPS.
   0.4  Argo CD app-of-apps, deploy/ tree laid out, everything from 0.3 moved INTO git and
@@ -233,8 +243,9 @@ delivers code from git commit to running pod with no human step.
          b) Tempo + Alloy OTLP receive          EXIT TEST: hello-service span in Grafana
          c) Loki + Alloy log tailing            EXIT TEST: log line correlated to that
                                                 span by trace_id
-       Also in this step: delete the two orphaned PVCs and the Jaeger and Kong CRDs left
-       from the old stack, and record it in CLUSTER.md.
+       The old stack's leftovers are already gone as of 0.2b, so this installs onto an
+       empty cluster rather than around a corpse. The monitoring, logging and tracing
+       namespaces get recreated here BY ARGO CD, not by hand.
   0.7  data plane. CNPG + Postgres, Redis, Strimzi + Kafka with retention set.
        EXIT TEST: hello-service writes a row, caches it, produces and consumes a Kafka
        message, and all of it is visible in one Grafana trace.
