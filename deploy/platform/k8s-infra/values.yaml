@@ -11,9 +11,17 @@
 
 clusterName: homelab
 
-# gRPC (4317) rather than HTTP here: this is the agent's own hot path, node-local
-# and high volume. Plain text inside the pod network, same as everything else.
-otelCollectorEndpoint: signoz-otel-collector.signoz.svc.cluster.local:4317
+# FULL URL WITH SCHEME, AND PORT 4318 — and note this is the exact OPPOSITE of what
+# pkg/obs needs, which is host:port with no scheme.
+#
+# The Go SDK's otlptracehttp.WithEndpoint takes host:port and REJECTS a scheme.
+# The Collector's otlphttp exporter takes a URL and REQUIRES one. Same protocol,
+# inverted conventions, and getting it wrong fails as:
+#   unsupported protocol scheme "signoz-otel-collector.signoz.svc.cluster.local"
+#
+# 4318 is HTTP; 4317 is gRPC. This agent's exporter is otlphttp, so 4317 would be
+# wrong even with a scheme — it would speak HTTP at a gRPC listener.
+otelCollectorEndpoint: http://signoz-otel-collector.signoz.svc.cluster.local:4318
 otelInsecure: true
 
 presets:
