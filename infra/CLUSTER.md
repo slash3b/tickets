@@ -381,6 +381,39 @@ TEARDOWN 2026-08-23 - CINEPLEX
   To make the removal permanent at the source, delete k8s/base from that repo.
 
 
+VIRTUALIZATION AND SIZING - measured 2026-08-24
+-----------------------------------------------
+
+  All three nodes are KVM guests (systemd-detect-virt reports kvm) on ONE physical host.
+  This was never written down before and it matters more than anything else in this file.
+
+    node             vCPU   RAM      disk
+    k8s-ctrl-plane      6   7.7Gi     15G
+    k8s-node-1          4   7.6Gi     15G
+    k8s-node-2          4   5.7Gi     15G     <- odd one out, less RAM than the others
+    -------------------------------------
+    allocated          14  ~21Gi      45G
+    PHYSICAL HOST       ?   48G      500G
+
+  ~27G of RAM and ~455G of disk are UNALLOCATED. The guests use nine percent of the
+  host's storage. Every disk crisis in this file was a VM-sizing problem wearing a
+  capacity problem's clothes.
+
+  ONE HOST means node failure is not really independent - the three "nodes" share a
+  kernel, a disk and a power cable. Fine for learning; worth remembering before drawing
+  any conclusion about high availability from this cluster.
+
+  RESIZING, when it happens: etcd is a single member on the control plane, so shutting
+  that guest down stops the entire Kubernetes API. Drain and resize the WORKERS FIRST,
+  one at a time, and do the control plane last. Growing a qcow2 with qemu-img changes
+  nothing inside the guest until growpart and then resize2fs are run, in that order.
+  These are cloud images: sda1 is the large partition, sda14 and sda15 are small boot
+  partitions ahead of it, so growpart /dev/sda 1 is correct.
+
+  MISSING: there is no metrics-server. kubectl top and the Metrics API return
+  "Metrics API not available", and no HorizontalPodAutoscaler can work without it.
+
+
 DISK - MEASURED AND RECLAIMED 2026-08-24
 ----------------------------------------
 
