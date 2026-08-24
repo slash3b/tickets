@@ -1,7 +1,8 @@
 # reeldex
 
-Workspace holding four independent repos: `cineplex`, `infra`, `tpl`, `.github`.
-The workspace root itself is not a git repo.
+Monorepo (`git@github.com:slash3b/tickets.git`). Everything lives in this one repo:
+`cineplex`, `infra`, `tpl`. The `.github/` directory is the separate reeldex org
+profile repo and is gitignored here.
 
 ## infra/CLUSTER.md is the state file — keep it current
 
