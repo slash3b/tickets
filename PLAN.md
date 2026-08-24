@@ -260,42 +260,16 @@ PART 3 - PHASING
 PHASE 0 - PLATFORM. No business logic. Ends with a cluster that is fully observable and
 delivers code from git commit to running pod with no human step.
 
-  0.0  RESIZE THE VMS. Nothing else in phase 0 starts until this is done.
-       The three KVM guests are badly under-provisioned against the host: 14 vCPU,
-       ~21Gi RAM and 45G disk allocated out of 48G RAM and 500G storage. The VMs are
-       using nine percent of the host's disk.
-
-       Target, leaving the host ~8G RAM and ~100G:
-         k8s-ctrl-plane   12G RAM   100G disk
-         k8s-node-1       14G RAM   150G disk
-         k8s-node-2       14G RAM   150G disk    <- equalize it, it is the odd one out
-       vCPU to be decided once the host core count is known.
-
-       ORDER MATTERS AND GETTING IT WRONG TAKES THE CLUSTER DOWN. etcd is a single
-       member living on the control plane, so shutting that VM down stops the entire
-       Kubernetes API. Do the workers first, one at a time, and the control plane last:
-
-         kubectl drain k8s-node-1 --ignore-daemonsets --delete-emptydir-data
-         virsh shutdown k8s-node-1
-         virsh setmaxmem k8s-node-1 14G --config
-         virsh setmem    k8s-node-1 14G --config
-         qemu-img resize /var/lib/libvirt/images/k8s-node-1.qcow2 150G
-         virsh start k8s-node-1
-         # then inside the guest, because qemu-img only grows the virtual disk:
-         sudo growpart /dev/sda 1 && sudo resize2fs /dev/sda1
-         kubectl uncordon k8s-node-1
-
-       Then repeat for node-2, then the control plane - accepting a few minutes of API
-       downtime for that last one, with no drain needed since it runs only control-plane
-       components.
-
-       GOTCHA: growing the qcow2 does nothing visible inside the guest on its own. The
-       partition and then the filesystem each have to be grown, in that order. These are
-       cloud images where sda1 is the large partition and sda14/sda15 are small boot
-       partitions ahead of it, so growpart on partition 1 is the right call.
-
-       EXIT TEST: kubectl get nodes shows the new capacity, and all 23 pods return to
-       Running.
+  0.0  VMs resized                                              DONE 2026-08-24
+       RAM 7.7/7.6/5.7Gi -> 12.5/14.5/14.5G, disk 15/15/15G -> 40/95/95G. Done online
+       via Proxmox with no downtime and no reboot - qm resize, then growpart and
+       resize2fs inside each guest. All three nodes Ready afterwards, zero pods
+       disturbed. See VIRTUALIZATION in CLUSTER.md.
+       Total VM disk allocation is 334.51G against a 337.86 GiB LVM-thin pool, chosen
+       so the pool can NEVER be over-committed. Growing anything further means freeing
+       something first - the stopped minikube VM and its snapshots are the slack.
+       REMAINING: untaint the control plane so its 12.5G of RAM is schedulable, keeping
+       ClickHouse, Kafka and Postgres off it by affinity.
 
   0.1  disk reclaimed, all three nodes                           DONE 2026-08-24
        83/50/43% -> 47/29/16%, ~30G free cluster-wide. See DISK in CLUSTER.md.

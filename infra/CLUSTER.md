@@ -381,34 +381,80 @@ TEARDOWN 2026-08-23 - CINEPLEX
   To make the removal permanent at the source, delete k8s/base from that repo.
 
 
-VIRTUALIZATION AND SIZING - measured 2026-08-24
------------------------------------------------
+VIRTUALIZATION - PROXMOX
+------------------------
 
-  All three nodes are KVM guests (systemd-detect-virt reports kvm) on ONE physical host.
-  This was never written down before and it matters more than anything else in this file.
+  HYPERVISOR   proxmox    192.168.1.12    web UI https://192.168.1.12:8006
+               pve-manager 9.2.11, kernel 7.0.14-12-pve
+               45Gi RAM, 16 cores
+               root SSH by key from the workstation. Found by its VMs' MAC prefix
+               bc:24:11 (Proxmox OUI) plus port 8006 open.
 
-    node             vCPU   RAM      disk
-    k8s-ctrl-plane      6   7.7Gi     15G
-    k8s-node-1          4   7.6Gi     15G
-    k8s-node-2          4   5.7Gi     15G     <- odd one out, less RAM than the others
-    -------------------------------------
-    allocated          14  ~21Gi      45G
-    PHYSICAL HOST       ?   48G      500G
+  STORAGE
+    local       dir       98 GiB total, ~64 GiB free   ISOs, templates, backups
+    local-lvm   lvmthin  338 GiB pool                  every VM disk lives here
 
-  ~27G of RAM and ~455G of disk are UNALLOCATED. The guests use nine percent of the
-  host's storage. Every disk crisis in this file was a VM-sizing problem wearing a
-  capacity problem's clothes.
+    LVM-THIN IS THE THING TO BE CAREFUL WITH. It allows allocating more than exists. If
+    guests ever actually fill an over-committed pool, the pool exhausts and EVERY VM ON
+    THE HOST freezes at once, with a real risk of corruption. Total allocation is
+    deliberately kept UNDER the pool size so this cannot happen:
 
-  ONE HOST means node failure is not really independent - the three "nodes" share a
-  kernel, a disk and a power cable. Fine for learning; worth remembering before drawing
-  any conclusion about high availability from this cluster.
+      total allocated across all VM disks   334.51G
+      pool size                             337.86 GiB      no over-commit, by design
 
-  RESIZING, when it happens: etcd is a single member on the control plane, so shutting
-  that guest down stops the entire Kubernetes API. Drain and resize the WORKERS FIRST,
-  one at a time, and do the control plane last. Growing a qcow2 with qemu-img changes
-  nothing inside the guest until growpart and then resize2fs are run, in that order.
-  These are cloud images: sda1 is the large partition, sda14 and sda15 are small boot
-  partitions ahead of it, so growpart /dev/sda 1 is correct.
+    If a VM ever needs more disk, something else has to give it up first. Do not resize
+    past the pool. The stopped VMs are where the slack is: minikube (101) holds 30G plus
+    a 30G snapshot and a 12.5G state file, and templates 802 and 900 hold 15G each.
+
+  VMS - resized 2026-08-24
+
+    id   name             vCPU   RAM       disk
+    800  k8s-ctrl-plane      6   12500M     40G
+    801  k8s-node-1          4   14500M     95G
+    803  k8s-node-2          4   14500M     95G
+    101  minikube            -    4094M     30G   stopped
+    802  k8s-node-tpl        -    1024M     15G   stopped, template
+    900  debian-template     -    1024M     15G   stopped, template
+    100  pihole              -        -      2G   stopped LXC, disk 97.7% FULL
+
+    RAM IS NEAR THE LIMIT: 41500M allocated to the three running guests against 45Gi on
+    the host, leaving ~3.5Gi for Proxmox itself. DO NOT START minikube (4094M) while the
+    cluster runs - that would leave the host nothing.
+
+  HOW THE RESIZE WAS DONE, and it is easier than expected
+
+    NO DOWNTIME AND NO REBOOT. Proxmox grows a virtio-scsi disk online via QMP, so the
+    guests kept running throughout - including the control plane, which means the
+    single-member etcd was never at risk. Earlier notes in this file described a
+    drain-and-shutdown procedure; that was written for raw libvirt and is wrong for
+    Proxmox. Do not shut anything down for a disk grow.
+
+    On the hypervisor, per VM:
+      qm resize <vmid> scsi0 +80G          # ALWAYS use +N, never an absolute size
+    Then inside the guest, because growing the virtual disk is invisible to it:
+      echo 1 | sudo tee /sys/class/block/sda/device/rescan
+      sudo growpart /dev/sda 1
+      sudo resize2fs /dev/sda1
+
+    Both steps are required and in that order: growpart moves the partition boundary,
+    resize2fs grows the ext4 filesystem into it. resize2fs works on a MOUNTED root
+    filesystem - it reports "on-line resizing required" and proceeds.
+
+    These are cloud images: sda1 is the large partition, sda14 (3M) and sda15 (124M) are
+    small boot partitions AHEAD of it, so growpart /dev/sda 1 is the correct target.
+
+    resize2fs lives in /usr/sbin and is not on a normal user's PATH. Call it via sudo.
+
+    Verified after: all three nodes Ready, zero pods not Running, /healthz ok.
+
+  SCHEDULING CONSTRAINT
+
+    k8s-ctrl-plane is TAINTED node-role.kubernetes.io/control-plane, so only node-1 and
+    node-2 accept ordinary workloads. That is 29G of worker RAM for a stack that wants
+    ~25G, which is too tight. The intent is to untaint the control plane to reclaim its
+    12.5G, while keeping ClickHouse, Kafka and Postgres OFF it by node affinity - etcd is
+    sensitive to disk latency and sharing a spindle with ClickHouse is a reliable way to
+    destabilise the API server.
 
   MISSING: there is no metrics-server. kubectl top and the Metrics API return
   "Metrics API not available", and no HorizontalPodAutoscaler can work without it.
