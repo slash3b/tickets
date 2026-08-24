@@ -1,0 +1,15 @@
+# metrics-server — missing from this cluster entirely until now. Without it
+# `kubectl top` returns "Metrics API not available" and no HorizontalPodAutoscaler
+# can function, because there is nothing serving metrics.k8s.io.
+args:
+  # REQUIRED ON THIS CLUSTER. kubeadm issues kubelet serving certificates from its
+  # own CA, and metrics-server will not trust them by default — it fails with
+  # "x509: certificate signed by unknown authority" and every node reads as
+  # unavailable. The correct fix is enabling serverTLSBootstrap and approving the
+  # kubelet CSRs; this flag is the homelab shortcut. Metrics traffic stays inside
+  # the pod network.
+  - --kubelet-insecure-tls
+  - --kubelet-preferred-address-types=InternalIP,Hostname,ExternalIP
+resources:
+  requests: {cpu: 50m, memory: 64Mi}
+  limits:   {memory: 128Mi}

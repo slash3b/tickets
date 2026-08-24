@@ -196,6 +196,22 @@ Seven, plus the SPA. The seventh (gateway) exists only because the frontend is a
 SPA; a server-rendered frontend would not need it. Adding an eighth requires a reason
 written down here first.
 
+  hello is that reason, and it is NOT a domain service. It is the platform canary: a
+  service with no business logic that serves /livez and /readyz and emits exactly one
+  metric, one log line and one trace span. It stays permanently.
+
+  WHY IT EARNS ITS PLACE: it is the control variable. When inventory stops producing
+  traces, the question is whether the code broke or the platform broke, and without a
+  known-good service that question costs an hour of debugging the wrong thing. With
+  hello it costs five seconds. It is also the smoke test after every platform change -
+  upgrade Argo CD, ingress-nginx or SigNoz, and the question "does anything still
+  build, deploy and trace" has a cheap answer. And it is the reference implementation:
+  every service here is hello with logic added, so a new service that misbehaves gets
+  diffed against it.
+
+  It costs 32Mi and 10m of CPU. If it ever stops being maintained it becomes exactly
+  the kind of leftover this project keeps deleting, so it is maintained deliberately.
+
 Language is Go for every service, reusing cineplex/pkg (logger, otel, health, http, env,
 option) as the shared foundation. That package set is already good and is the main thing
 worth keeping from cineplex. Every service exposes /livez and /readyz and emits OTLP to
