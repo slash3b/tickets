@@ -192,44 +192,164 @@ and nobody else can take them. Only the hard deadline sends an order to reconcil
 SERVICES
 --------
 
-Seven. The seventh (gateway) exists only because the frontend is a React SPA; a
-server-rendered frontend would not need it. Adding an eighth requires a reason written
-down here first.
-
-  gateway        Browser-facing BFF. One origin for the SPA, terminates WebSockets,
-                 aggregates catalog reads, mints stub JWTs, applies per-user rate limits.
-                 Stateless. Owns no data.
-                 TEACHES: fan-out, connection handling, load shedding at the edge.
-
-  catalog        Venues, seats, events, seat charts, prices. Read-heavy, almost never
-                 written. Everything it serves is cacheable for minutes.
-                 TEACHES: read scaling and cache invalidation, in the easy case.
-
-  inventory      Owns EventSeat and Hold. THE contended service. The only writer of seat
-                 status. Runs the expiry sweeper and the invariant checker.
-                 TEACHES: concurrency control, isolation levels, deadlock, not
-                 overselling. This is the heart of the project.
-
-  orders         Saga orchestrator. Owns Order. Drives hold -> charge -> commit, persists
-                 its position at every step so it can resume after a crash.
-                 TEACHES: sagas, forward recovery, crash-consistent workflows.
-
-  payments       Owns Payment. Idempotency keys, retry policy, webhook dedup. The only
-                 service permitted to talk to the bank.
-                 TEACHES: idempotency, exactly-once-ish semantics over an unreliable peer.
-
-  bank           The fake bank. Deliberately adversarial - see its own section.
-                 TEACHES: nothing by itself. It exists to make the others suffer.
-
-  simulator      Spawns virtual buyers. Not a test script - a deployed service that keeps
-                 the system permanently under load.
-                 TEACHES: it is the source of every other lesson.
-
-Plus web: the React SPA. Static build, served by nginx or by gateway.
+Seven, plus the SPA. The seventh (gateway) exists only because the frontend is a React
+SPA; a server-rendered frontend would not need it. Adding an eighth requires a reason
+written down here first.
 
 Language is Go for every service, reusing cineplex/pkg (logger, otel, health, http, env,
 option) as the shared foundation. That package set is already good and is the main thing
-worth keeping from cineplex.
+worth keeping from cineplex. Every service exposes /livez and /readyz and emits OTLP to
+the node's Alloy agent; none of them know what is behind it.
+
+DEPENDENCY DIRECTION. Arrows point from caller to callee. There are no cycles, and any
+change that would introduce one is wrong.
+
+    browser
+       |
+       v
+    gateway ------+-----------+
+       |          |           |
+       v          v           v
+    catalog   inventory <-- orders --> payments --> bank
+       |          |           |            |          |
+       +----------+-----------+------------+----------+
+                        |
+                     Kafka  (everything produces; gateway and catalog consume)
+
+  simulator drives gateway exactly as a browser would - it is a client, not a peer, and
+  it gets no privileged path into the system. If the simulator needs an internal API to
+  work, the API is wrong.
+
+
+  gateway
+  .......
+    ROLE       Browser-facing BFF. The only service reachable from outside the cluster.
+    OWNS       No data. Fully stateless, horizontally scalable, no PVC.
+    SERVES     the entire public API in DESIGN.md > PUBLIC API
+    CALLS      catalog (gRPC), inventory (gRPC), orders (gRPC)
+    CONSUMES   inventory.seat.held / released / sold -> fans out to WebSocket clients
+    PRODUCES   nothing
+    STATE      in-memory WebSocket registry, keyed by (event_id, section_id). Lost on
+               restart, and that is fine - clients reconnect and re-fetch the section.
+    SCALING    the connection-bound service. During a concert on-sale this is what runs
+               out of file descriptors first, not CPU. Every replica consumes the same
+               Kafka topics with its own consumer group, because every replica needs
+               every seat event for the clients it holds.
+    TEACHES    fan-out, connection handling, load shedding at the edge, and why a BFF's
+               consumer group semantics differ from a worker's.
+
+  catalog
+  .......
+    ROLE       Venues, sections, seats, events, prices. Read-heavy, almost never written.
+    OWNS       catalog.venues, catalog.sections, catalog.seats, catalog.events
+    SERVES     gRPC: ListEvents, GetEvent, ListSections, GetSectionSeats
+    CALLS      nothing
+    CONSUMES   inventory.seat.status (compacted) -> maintains the seat-map read model
+    PRODUCES   nothing
+    STATE      Postgres for truth, Redis for the seat-map projection and event lists
+    SCALING    trivially horizontal, stateless replicas over a shared cache. This is the
+               easy service, on purpose - it is where the caching lessons live without
+               correctness at stake.
+    TEACHES    read scaling, cache invalidation, and read models that are ALLOWED to lag.
+
+  inventory
+  .........
+    ROLE       The contended core. The ONLY writer of seat status anywhere in the system.
+    OWNS       inventory.event_seats, inventory.holds, inventory.hold_seats
+    SERVES     gRPC: Hold, Release, Convert, Commit, GetHold
+    CALLS      nothing. It is a leaf, deliberately - the most contended service has the
+               fewest dependencies so its latency is its own.
+    CONSUMES   nothing
+    PRODUCES   inventory.seat.held, .released, .sold, .status
+    STATE      Postgres only. NEVER serves a read from Redis - the cache is downstream in
+               catalog, where staleness is harmless.
+    BACKGROUND expiry sweeper (active holds past expires_at -> released)
+               hard-deadline sweeper (converting holds past 15m -> released + flag order)
+               invariant checker (continuous, asserts the two invariants in SEAT STATE
+               MACHINE and fires an alert on any violation)
+    SCALING    horizontal replicas are fine - all coordination is in Postgres, none in
+               the process. Postgres row locks are the real limit, and that limit is
+               per-seat, so throughput scales with seat spread rather than replica count.
+               The sweepers must be singletons; run them as a separate Deployment with
+               one replica, or lease them, but do not run one per API replica.
+    TEACHES    concurrency control, isolation levels, deadlock and its retry, and not
+               overselling. This is the heart of the project.
+
+  orders
+  ......
+    ROLE       Saga orchestrator. Owns the multi-step purchase and its failure paths.
+    OWNS       orders.orders, orders.order_seats, orders.saga_log
+    SERVES     gRPC: CreateOrder, GetOrder
+    CALLS      inventory (Convert, Commit, Release), payments (CreateIntent, GetIntent)
+    CONSUMES   payments.succeeded, payments.failed
+    PRODUCES   orders.created, orders.confirmed, orders.failed
+    STATE      Postgres. Every saga step is persisted BEFORE it is attempted, so a crash
+               resumes rather than restarts. saga_log is the crash-recovery record and
+               the audit trail both.
+    BACKGROUND resumer - finds orders stuck mid-saga after a crash and drives them
+               forward. Singleton, same as inventory's sweepers.
+    SCALING    horizontal for the API, singleton for the resumer.
+    TEACHES    sagas, forward recovery, crash-consistent workflows, and the paid-to-
+               confirmed gap where all the interesting bugs live.
+
+  payments
+  ........
+    ROLE       The only service permitted to talk to the bank. All money moves through it.
+    OWNS       payments.payments, payments.idempotency_keys, payments.webhook_events
+    SERVES     gRPC: CreateIntent, GetIntent
+               HTTP: POST /webhooks/bank  (the bank calls in here)
+    CALLS      bank (HTTP)
+    CONSUMES   nothing
+    PRODUCES   payments.succeeded, payments.failed
+    STATE      Postgres. idempotency_keys maps key -> result so a retry returns the
+               original answer instead of charging twice. webhook_events dedups by
+               (payment_id, bank_event_id) because the bank WILL deliver duplicates.
+    BACKGROUND reconciler - for every payment in an unknown state past a timeout, asks
+               the bank what actually happened. This is what catches the
+               timed-out-but-succeeded case, and it is the reason that case is survivable
+               rather than fatal.
+    SCALING    horizontal. All dedup state is in Postgres, keyed, unique-constrained.
+    TEACHES    idempotency, exactly-once-ish over an unreliable peer, reconciliation.
+
+  bank
+  ....
+    ROLE       The antagonist. Fake, adversarial, configurable. See THE FAKE BANK.
+    OWNS       bank.accounts, bank.charges  (entirely fictional money)
+    SERVES     HTTP: POST /authorize, /capture, /refund, and PUT /config for chaos knobs
+    CALLS      payments, via webhook callback
+    STATE      Postgres, or in-memory - it does not matter, because nothing downstream
+               is allowed to trust it anyway.
+    SCALING    single replica. Making the antagonist highly available would be absurd.
+    TEACHES    nothing by itself. It exists so the others have something to survive.
+
+  simulator
+  .........
+    ROLE       The load. Virtual buyers as state machines. A deployed service, not a
+               test script, and not a peer - it drives the public API like a browser.
+    OWNS       no shared data. Local state per virtual user only.
+    SERVES     HTTP: POST /config (profile mix, arrival rate, target event, mode)
+    CALLS      gateway, over the public HTTP and WebSocket API, exactly as a browser does
+    PRODUCES   its own metrics only - attempted, succeeded, 409'd, latency histograms
+    SCALING    THIS IS THE LOAD DIAL. Raising load is raising replica count.
+    TEACHES    everything else. It is the reason any of the other lessons ever occur.
+    KEY RULE   the simulator's own count of successful purchases is compared against the
+               backend's count of confirmed orders. Divergence between those two numbers
+               is the alarm that matters most in the entire system, because it is how an
+               oversell or a lost order announces itself.
+
+  web
+  ...
+    ROLE       React SPA. Static build.
+    SERVES     the seat map and the ops board
+    CALLS      gateway only
+    DEPLOY     built in CI, served by an nginx container behind the same ingress host as
+               gateway so there is no CORS and no second origin.
+
+SCHEMA OWNERSHIP IS ABSOLUTE. Every service owns its schema and no other service reads
+it - not with a join, not with a foreign key, not "just this once for a report". They
+share one Postgres instance purely to save memory on a small cluster, and that restraint
+is the only thing that keeps splitting them into separate databases later a config change
+rather than a rewrite.
 
 
 HOW A SEAT IS ACTUALLY CLAIMED

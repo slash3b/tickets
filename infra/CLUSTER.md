@@ -1,8 +1,9 @@
 HOMELAB KUBERNETES - STATE OF THE CLUSTER
 Snapshot 2026-08-24, taken from k8s-ctrl-plane (192.168.1.116).
 Changes made 2026-08-23/24: cineplex removed, slash3b account added, Argo CD 3.0.6 -> 3.5.1.
-2026-08-24: no cluster changes, but disk was measured properly for the first time and the
-prune advice in ARGOCD UPGRADE was found to be wrong - see DISK.
+2026-08-24: control-plane disk reclaimed, 83% -> 50%. Disk measured properly for the
+first time and the prune advice in ARGOCD UPGRADE was found to be wrong - see DISK.
+Worker SSH found broken, see ACCESS. No workload changes.
 
 
 ACCESS
@@ -15,6 +16,28 @@ ACCESS
                         scp slash3b@192.168.1.116:~/.kube/config ~/.kube/homelab
                         export KUBECONFIG=~/.kube/homelab
   NodePort range      30000-32767 (default)
+
+  WORKER SSH IS BROKEN, found 2026-08-24. Neither worker can be reached from the
+  workstation or from the control plane, so any node-level work is control-plane-only
+  until this is fixed:
+
+    k8s-node-1  192.168.1.88   Permission denied (publickey,password) from the control
+                               plane. No key trusted there. Fix by copying a key:
+                                 ssh-copy-id slash3b@192.168.1.88
+
+    k8s-node-2  192.168.1.24   REMOTE HOST IDENTIFICATION HAS CHANGED. The control
+                               plane's known_hosts line 3 holds an ECDSA key; the host
+                               now presents ED25519
+                               SHA256:vnL6/8T/p5tSlHEaBg40OITWDzp28yiO4fobXnM5kpM
+                               VERIFY THIS IS A REBUILD BEFORE CLEARING IT - on a LAN
+                               homelab it almost certainly is, but confirm the
+                               fingerprint from the node's console rather than assuming:
+                                 ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+                               then, only if it matches:
+                                 ssh-keygen -f ~/.ssh/known_hosts -R 192.168.1.24
+
+  Neither is urgent for capacity - both workers sit under 48% disk - but both block
+  node-level work such as crictl pruning.
 
 There is no Ingress controller and no LoadBalancer. Anything reachable from outside the
 cluster is a NodePort; everything else needs kubectl port-forward.
@@ -330,13 +353,57 @@ TEARDOWN 2026-08-23 - CINEPLEX
   To make the removal permanent at the source, delete k8s/base from that repo.
 
 
-DISK - MEASURED 2026-08-24
---------------------------
+DISK - MEASURED AND RECLAIMED 2026-08-24
+----------------------------------------
 
-  / is 15G on all three nodes, 12G used, 2.5G free, ~83%. This is the binding constraint
-  on everything and it is what taints nodes with DiskPressure and stalls scheduling.
+  RECLAIMED ON THE CONTROL PLANE 2026-08-24. 83% -> 50%, free space 2.5G -> 7.1G.
+  What was deleted, all of it regenerable or already-spent:
 
-  IT IS NOT CONTAINER IMAGES. Measured on the control plane:
+    go clean -modcache                    2.4G   Go module cache under
+                                                 /home/slash3b/go-pkgs/pkg/mod
+    rm -rf /etc/kubernetes/tmp/kubeadm-*  1.2G   kubeadm upgrade backups, see below
+    apt-get clean                         1.1G   apt archives
+
+  No backup taken and none needed - the module cache re-downloads on demand, the apt
+  archives re-download on demand, and the kubeadm backups are rollback material for an
+  upgrade that completed and was verified on 2026-08-24.
+  Verified after: all three nodes Ready, /etc/kubernetes/{pki,manifests} and every
+  kubeconfig intact.
+
+  GOTCHA THAT COST TIME. /etc/kubernetes/tmp is mode 0700 root. A glob like
+    sudo rm -rf /etc/kubernetes/tmp/kubeadm-*
+  is expanded by YOUR shell, not by sudo, so as a normal user it cannot read the
+  directory, the glob does not expand, and rm silently receives a literal string and
+  deletes nothing. It reports success. Use instead:
+    sudo bash -c 'rm -rf /etc/kubernetes/tmp/kubeadm-*'
+
+  STATE AFTER, via the kubelet summary API
+  (kubectl get --raw /api/v1/nodes/<node>/proxy/stats/summary):
+
+    node             nodefs used   free    images
+    k8s-ctrl-plane   47%           7.5G    0.6G
+    k8s-node-1       47%           7.5G    3.1G
+    k8s-node-2       41%           8.6G    2.7G
+
+  THE 83% WAS CONTROL-PLANE ONLY. The workers were never the problem, and understanding
+  why is the useful part: during the Argo CD upgrade all three nodes went under
+  DiskPressure, but the workers' pressure was caused by IMAGES, so kubelet's image
+  garbage collector reclaimed them automatically and the workers self-healed. The
+  control plane's usage was a Go module cache, apt archives and kubeadm leftovers -
+  none of which kubelet can touch - so it stayed at 83% for a year.
+
+  Rule of thumb from this: image-driven disk pressure fixes itself and crictl prune only
+  ever hurries it along. Disk pressure from anything else never fixes itself. Check what
+  the disk is actually holding before reaching for crictl.
+
+  crictl prune remains the right tool for the WORKERS later, once per-commit image tags
+  from a multi-service deployment accumulate - they hold 3.1G and 2.7G of images now,
+  against 0.6G on the control plane. There is no urgency at 47% and 41%.
+
+  ORIGINAL MEASUREMENT, before reclamation, kept because it is what the breakdown looked
+  like and the pattern is worth remembering:
+
+  IT WAS NOT CONTAINER IMAGES. Measured on the control plane:
     sudo crictl images     ->  9 images, 710M total, every one in use
     /var/lib/containerd    ->  710M
   So "sudo crictl rmi --prune", which this file used to recommend as the fix, frees
@@ -365,10 +432,11 @@ DISK - MEASURED 2026-08-24
     397M  /var/lib/etcd              the database. Legitimate.
     115M  journals                   Reclaim: sudo journalctl --vacuum-size=50M
 
-  Roughly 5G is reclaimable in three commands without touching anything the cluster
-  needs. Note the pattern worth remembering: on this cluster disk pressure has come from
-  a developer home directory and from kubeadm's own leftovers, not from Kubernetes
-  workloads.
+  Roughly 5G was reclaimable in three commands without touching anything the cluster
+  needs, and was reclaimed. Note the pattern: on this cluster disk pressure came from a
+  developer home directory and from kubeadm's own leftovers, not from Kubernetes
+  workloads. There is a Go toolchain building on the control plane, which is why the
+  module cache is there at all - worth deciding whether that should be the case.
 
   MEMORY IS NOT UNIFORM, which matters for placing anything stateful:
     k8s-ctrl-plane   8039156Ki  (~7.7Gi)
