@@ -250,13 +250,43 @@ Storage
   the first real one.
 
 
-GITOPS
-------
+GITOPS - APP OF APPS, LIVE SINCE 2026-08-24
+-------------------------------------------
 
-  Argo CD has NO Applications left. The only one, cineplex-prod, was deleted 2026-08-23.
-  It pointed at github.com/reeldex/cineplex.git, path k8s/base, revision HEAD, into the
-  default namespace. Its syncPolicy was empty (manual sync) at the time of deletion.
-  Everything else in the cluster is applied by hand.
+  Argo CD manages the platform from git@github.com:slash3b/tickets.git (PUBLIC repo, so
+  no credentials are configured). Applications:
+
+    root                 deploy/argocd/apps        the app of apps
+    metallb              chart + $values           wave 0
+    platform-manifests   deploy/manifests          wave 1
+    ingress-nginx        chart + $values           wave 2
+
+  ONLY ONE THING IS APPLIED BY HAND, ever:
+    kubectl apply -f deploy/argocd/root.yaml
+  Everything else is a child of it. Adding a component means adding a file to
+  deploy/argocd/apps/ and pushing.
+
+  All apps have automated sync with prune and selfHeal. VERIFIED 2026-08-24 by deleting
+  deploy/ingress-nginx-controller: Argo recreated it in 10 seconds, ready in 30, with a
+  new UID.
+
+  MULTI-SOURCE APPLICATIONS are how a helm chart gets values out of this repo: one
+  source is the upstream chart, a second is this repo with `ref: values`, and the chart
+  source references it as $values/deploy/platform/<name>/values.yaml. Without this the
+  values would have to be inlined into the Application, which puts configuration
+  somewhere nobody thinks to look.
+
+  HELM WAS DELIBERATELY UNINSTALLED for anything Argo owns. MetalLB and ingress-nginx
+  were first installed by helm in 0.3, then `helm uninstall`ed and rebuilt by Argo, so
+  there is exactly one owner per resource. `helm list -A` should show ONLY cert-manager.
+  If it ever shows more, something was installed by hand and needs adopting.
+
+  KNOWN DRIFT: cert-manager itself is still a helm release (rev 8, from 2025) and is NOT
+  managed by Argo. Only its ClusterIssuers are. Adopting the release means dealing with
+  CRDs and webhooks, which is not worth doing until there is a reason to upgrade it.
+
+  History: the only previous Application, cineplex-prod, was deleted 2026-08-23. It
+  pointed at github.com/reeldex/cineplex.git, path k8s/base, into the default namespace.
 
 
 ARGOCD UPGRADE - v3.0.6 to v3.5.1, done 2026-08-24

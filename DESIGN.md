@@ -569,6 +569,11 @@ Virtual buyers as state machines, arriving as a Poisson process, each picking a 
 Two load modes, and the system must survive both:
 
   steady      constant arrival rate, hours or days. Finds leaks, drift, slow degradation.
+              THE DEFAULT IS ONE SHOWING PER DAY with a handful of buyers, and it stays
+              there until someone deliberately raises it. A system that is quietly busy
+              is observable and debuggable; a system under permanent stress is neither,
+              and it outruns anyone's ability to read the code that produced it. The
+              on-sale burst below is a thing you trigger, never a default.
   on-sale     the concert case. 100,000 buyers arriving inside 60 seconds for one
               20,000-seat arena event, most of them wanting 2-6 adjacent seats. Finds
               everything else. This is where "high load" means something here, and it is

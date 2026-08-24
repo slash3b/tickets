@@ -327,9 +327,12 @@ delivers code from git commit to running pod with no human step.
        of these are harmless. Delete all three anyway - they are misleading to read.
 
        EXIT TEST: a hostname on the LAN resolves to a cluster service over HTTPS.
-  0.4  Argo CD app-of-apps, deploy/ tree laid out, everything from 0.3 moved INTO git and
-       re-synced from there rather than left as a hand-applied install.
-       EXIT TEST: kubectl delete the ingress controller, Argo puts it back.
+  0.4  Argo CD app-of-apps                                      DONE 2026-08-24
+       deploy/ is the source of truth. MetalLB and ingress-nginx were helm-uninstalled
+       and rebuilt by Argo so there is exactly one owner per resource; helm list -A now
+       shows only cert-manager. EXIT TEST PASSED: deleting the ingress controller
+       deployment had it recreated in 10s, ready in 30s, with a new UID.
+       See GITOPS in CLUSTER.md.
   0.5  hello-service. A Go service that does nothing but serve /healthz and emit one
        metric, one log line and one trace span. Full CI: commit -> image -> Docker Hub ->
        tag bump -> Argo sync -> reachable via ingress.
