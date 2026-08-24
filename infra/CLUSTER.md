@@ -3,8 +3,8 @@ Snapshot 2026-08-24, taken from k8s-ctrl-plane (192.168.1.116).
 Changes made 2026-08-23/24: cineplex removed, slash3b account added, Argo CD 3.0.6 -> 3.5.1.
 2026-08-24: control-plane disk reclaimed, 83% -> 50%. Disk measured properly for the
 first time and the prune advice in ARGOCD UPGRADE was found to be wrong - see DISK.
-Worker host keys verified out-of-band and known_hosts repaired, see ACCESS.
-No workload changes.
+Worker host keys verified out-of-band, known_hosts repaired, key auth now working to
+both workers, see ACCESS. No workload changes.
 
 
 ACCESS
@@ -40,17 +40,21 @@ ACCESS
   Both nodes' on-disk keys matched what ssh-keyscan saw on the network, which is what
   rules out a man in the middle. The pod is disposable; delete it afterwards.
 
-  KEY AUTH still needs the control-plane pubkey installed on both workers:
-    ssh-ed25519 AAAA...+tYb slash3b@gmail.com   (SHA256:gcgPtrJ4MMYnxpD7pMDxkof6EGOInW/XMJVO+xYPxEQ)
-  Install with, from the control plane:
-    ssh-copy-id slash3b@192.168.1.88
-    ssh-copy-id slash3b@192.168.1.24
-  Password auth is enabled on both workers and the account password is in your password
-  manager, not in this file. Once the key is installed, consider disabling password auth
-  on the workers entirely.
+  KEY AUTH WORKS ON BOTH WORKERS as of 2026-08-24. The control-plane key
+    ssh-ed25519 ... slash3b@gmail.com   SHA256:gcgPtrJ4MMYnxpD7pMDxkof6EGOInW/XMJVO+xYPxEQ
+  is installed in ~slash3b/.ssh/authorized_keys on .88 and .24, so the control plane is a
+  working jump host to every node:
+    ssh slash3b@192.168.1.116                       control plane
+    ssh -J slash3b@192.168.1.116 slash3b@192.168.1.88   node-1
+    ssh -J slash3b@192.168.1.116 slash3b@192.168.1.24   node-2
 
-  Neither is urgent for capacity - both workers sit under 48% disk - but both block
-  node-level work such as crictl pruning.
+  The workstation itself still has no host keys or authorized key for the workers; go
+  through the control plane, or repeat ssh-copy-id from the workstation if direct access
+  is wanted.
+
+  PASSWORD AUTH IS STILL ENABLED on both workers. Now that key auth works it should be
+  turned off - set PasswordAuthentication no in /etc/ssh/sshd_config on each worker and
+  reload sshd. The account password is in your password manager, not in this file.
 
 There is no Ingress controller and no LoadBalancer. Anything reachable from outside the
 cluster is a NodePort; everything else needs kubectl port-forward.
