@@ -44,7 +44,10 @@ spec:
       # Better than ignoreDifferences path-by-path, which would need brittle
       # container/env array indices.
       - ServerSideDiff=true
-  # ClickHouse and its operator take a while to converge on first install.
-  retry:
-    limit: 5
-    backoff: {duration: 30s, factor: 2, maxDuration: 5m}
+    # ClickHouse and its operator take a while to converge on first install.
+    # NOTE: retry belongs under syncPolicy, NOT at spec level. Putting it at
+    # spec.retry makes it an unknown field that the API server silently drops, so
+    # git keeps saying it exists and the parent app diffs against that forever.
+    retry:
+      limit: 5
+      backoff: {duration: 30s, factor: 2, maxDuration: 5m}
