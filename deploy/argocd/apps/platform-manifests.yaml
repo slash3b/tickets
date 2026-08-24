@@ -1,0 +1,23 @@
+# Plain manifests: the MetalLB address pool, the cert-manager issuer chain, and
+# the Argo CD ingress. Per-resource sync waves are annotated in the files.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-manifests
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/slash3b/tickets.git
+    targetRevision: main
+    path: deploy/manifests
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions:
+      - ServerSideApply=true

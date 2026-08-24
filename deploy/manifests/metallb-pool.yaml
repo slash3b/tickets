@@ -10,6 +10,8 @@
 apiVersion: metallb.io/v1beta1
 kind: IPAddressPool
 metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
   name: lan-pool
   namespace: metallb-system
 spec:
@@ -20,6 +22,8 @@ spec:
 apiVersion: metallb.io/v1beta1
 kind: L2Advertisement
 metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
   name: lan
   namespace: metallb-system
 spec:

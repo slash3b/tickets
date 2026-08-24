@@ -1,0 +1,28 @@
+# App of apps. This is the ONLY thing applied by hand; everything else in the
+# cluster is a child of it and comes from git.
+#
+#   kubectl apply -f deploy/argocd/root.yaml
+#
+# After that, adding a component means adding a file to deploy/argocd/apps/.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/slash3b/tickets.git
+    targetRevision: main
+    path: deploy/argocd/apps
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

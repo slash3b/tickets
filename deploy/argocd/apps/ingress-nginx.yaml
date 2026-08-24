@@ -1,0 +1,31 @@
+# ingress-nginx. Wave 2: MetalLB and its address pool must exist first, or the
+# LoadBalancer service sits Pending with no IP to hand it.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ingress-nginx
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - repoURL: https://kubernetes.github.io/ingress-nginx
+      chart: ingress-nginx
+      targetRevision: 4.15.1
+      helm:
+        valueFiles:
+          - $values/deploy/platform/ingress-nginx/values.yaml
+    - repoURL: https://github.com/slash3b/tickets.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ingress-nginx
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
