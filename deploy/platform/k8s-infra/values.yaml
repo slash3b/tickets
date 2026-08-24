@@ -1,0 +1,47 @@
+# k8s-infra — the DaemonSet half of SigNoz.
+#
+# The signoz chart gives you the store, the UI and an OTLP endpoint. It does NOT
+# collect anything by itself. This is what tails container logs off each node and
+# scrapes node/pod/cluster metrics, which is what makes the infrastructure half of
+# the Datadog picture appear at all.
+#
+# Without it, applications that push OTLP still get traces and metrics — but their
+# LOG LINES never reach the store, so trace-to-log correlation silently does not
+# work. Two of three signals, with nothing obviously broken.
+
+clusterName: homelab
+
+# gRPC (4317) rather than HTTP here: this is the agent's own hot path, node-local
+# and high volume. Plain text inside the pod network, same as everything else.
+otelCollectorEndpoint: signoz-otel-collector.signoz.svc.cluster.local:4317
+otelInsecure: true
+
+presets:
+  logsCollection:
+    enabled: true
+  hostMetrics:
+    enabled: true
+  kubeletMetrics:
+    enabled: true
+  clusterMetrics:
+    enabled: true
+  otlpExporter:
+    enabled: true
+
+otelAgent:
+  # DaemonSet: one per node, including the control plane, so nothing is a blind
+  # spot. Tolerations matter here even though the control plane is untainted —
+  # if it is ever re-tainted, losing telemetry from it should not be the way you
+  # find out.
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits:   {memory: 384Mi}
+
+otelDeployment:
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits:   {memory: 384Mi}
