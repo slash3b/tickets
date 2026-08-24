@@ -634,21 +634,44 @@ session, per CLAUDE.md.
 OBSERVABILITY
 -------------
 
-Non-negotiable and built in from the first service, not retrofitted. cineplex/pkg/otel
-already does the setup; the pattern is proven and gets lifted wholesale.
+Non-negotiable and built in from the first service, not retrofitted. The target is
+Datadog parity with open source, and the platform is SigNoz - see PLAN.md for what gets
+installed and why that was chosen over assembling the Grafana stack.
+
+WHAT THE SERVICES ACTUALLY DO is the important part here, and it is almost nothing:
+
+  Every service emits plain OTLP. cineplex/pkg/otel already does this and gets lifted
+  wholesale. No service imports a SigNoz package, knows a SigNoz hostname, or contains
+  the string "signoz" anywhere. They speak OTLP to a collector endpoint given by an
+  environment variable.
+
+  That discipline is worth stating because it is what keeps the backend replaceable. If
+  SigNoz turns out to be the wrong call at milestone 6, moving to Tempo and Loki and
+  VictoriaMetrics is a collector reconfiguration - not one line changed across eight
+  services. Vendor neutrality is the entire point of OTLP and it is free as long as
+  nobody breaks it for convenience.
 
   traces    one trace from browser click to seat sold, across all seven services. The
-            checkout path is meaningless without it.
-  metrics   RED per service, plus domain metrics that matter more than the RED ones:
-            holds created/expired/converted, oversell attempts blocked, bank decline
-            rate, seat-map staleness, hold-to-confirm latency.
-  logs      structured, zap, trace id on every line.
+            checkout path is meaningless without it. Browser spans included, so a slow
+            purchase is traceable from the user's click rather than from the gateway in.
+  metrics   RED per service, plus the domain metrics that matter more than RED here:
+            holds created / expired / converted, oversell attempts blocked, bank decline
+            rate, seat-map staleness, hold-to-confirm latency, and Kafka consumer lag
+            per partition - which is how the hot partition will announce itself.
+  logs      structured, zap, trace id on EVERY line. A log line without a trace id is a
+            log line that cannot be correlated, which on this stack makes it nearly
+            worthless.
+  profiles  continuous CPU and memory profiling, added at milestone 9 via Pyroscope.
+            For a system whose hot path is lock contention on seat rows, always-on
+            profiling is how you answer WHY p99 moved rather than just noticing it did.
 
-The cluster has empty monitoring, logging and tracing namespaces left over from a
-previous stack. They get refilled - see LEFTOVERS in CLUSTER.md for what was torn out.
+THE SINGLE MOST IMPORTANT NUMBER on any dashboard is the oversell counter. It reads zero.
+If it ever does not, everything else stops.
 
-The single most important dashboard number is the oversell counter. It reads zero. If it
-ever does not, everything else stops.
+THE SECOND MOST IMPORTANT is the divergence between the simulator's count of successful
+purchases and the backend's count of confirmed orders. Those two numbers are produced by
+independent systems and must agree. When they do not, either an oversell or a lost order
+has happened, and the gap is the first place it becomes visible.
 
 
 HOMELAB CONSTRAINTS

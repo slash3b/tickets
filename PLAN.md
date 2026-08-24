@@ -24,21 +24,40 @@ cert-manager is the interesting one: it is already running and doing nothing. It
 being dead weight the moment the ingress layer below needs certificates, which is the
 first thing this plan does. Nothing new to install for it.
 
-RESOURCE BASELINE, measured 2026-08-24 after disk reclamation and cleanup:
+RESOURCE BASELINE, measured 2026-08-24.
 
-  node             disk used   disk free   memory
-  k8s-ctrl-plane   47%          7.5G       7.7Gi
-  k8s-node-1       29%         10.4G       7.6Gi
-  k8s-node-2       16%         12.4G       5.7Gi   <- most disk, least RAM
+The three nodes are KVM guests on a single physical host, and they are badly
+under-provisioned against it:
 
-  total usable     ~30G disk   ~21Gi memory, minus ~1.5Gi/node system overhead
-                               so call it ~17Gi schedulable
+  node             vCPU   RAM     disk   used
+  k8s-ctrl-plane      6   7.7Gi    15G    47%
+  k8s-node-1          4   7.6Gi    15G    29%
+  k8s-node-2          4   5.7Gi    15G    16%
+  ------------------------------------------
+  allocated          14  ~21Gi     45G
+  PHYSICAL HOST       ?   48G     500G
 
-  DISK IS NO LONGER THE BINDING CONSTRAINT. It was ~8G free cluster-wide at the start of
-  2026-08-24 and is ~30G now. MEMORY IS THE CONSTRAINT INSTEAD, and node-2 having 5.7Gi
-  against the other two nodes' 7.6Gi is the single fact that drives placement decisions
-  from here on. Kafka and Postgres both want page cache and both pin to a node via
-  local-path; neither belongs on node-2.
+  ~27G of RAM and ~455G of disk are sitting unallocated. The guests are using nine
+  percent of the host's storage.
+
+  This single fact invalidates most of the resource anxiety elsewhere in this file and in
+  DESIGN.md. Aggressive Kafka retention, dropping a signal to save memory, deferring
+  replication - all of that was solving a problem created by VM sizing rather than by the
+  hardware. The answer is to resize the guests, which is phase 0.0, not to tune around it.
+
+  TARGET AFTER RESIZE - 40G RAM and 400G disk allocated, leaving the host ~8G and ~100G:
+
+  node             RAM    disk
+  k8s-ctrl-plane   12G    100G
+  k8s-node-1       14G    150G
+  k8s-node-2       14G    150G
+
+  ~35Gi schedulable after per-node system overhead. Everything in TOTAL FOOTPRINT fits
+  inside that, including the additions deferred to milestones 9 and 10.
+
+  STILL TRUE AFTER THE RESIZE: local-path storage pins a PVC to one node permanently, so
+  ClickHouse, Postgres and Kafka each choose a node once and live there. Spread them
+  across the three deliberately rather than letting the scheduler stack them.
 
 
 PART 2 - WHAT MUST BE INSTALLED
@@ -99,76 +118,82 @@ DATA PLANE - the stores DESIGN.md names
                         PLACEMENT: not node-2.
                         RETENTION IS MANDATORY FROM THE FIRST TOPIC - see DESIGN.md.
 
-OBSERVABILITY - the part that was specifically asked about
-..........................................................
+OBSERVABILITY - SIGNOZ. THE TARGET IS DATADOG PARITY
+....................................................
 
-The cluster already has empty monitoring, logging and tracing namespaces left from a
-previous stack that was torn out (see LEFTOVERS in CLUSTER.md). This refills them, and
-also cleans up the two orphaned PVCs still bound there from the old Tempo and Loki.
+The brief is Datadog-level observability with open source, and SigNoz was chosen over
+assembling the Grafana stack because it delivers the Datadog EXPERIENCE rather than the
+Datadog ingredients. Service map, per-endpoint RED metrics, flame graphs, exception
+tracking and trace-to-log correlation are prebuilt screens, not dashboards you construct.
 
-The shape is the Grafana stack, with one substitution:
+The cluster's empty monitoring, logging and tracing namespaces from the old torn-out
+stack were deleted 2026-08-24; this installs onto a clean cluster.
 
-  Grafana Alloy         THE AGENT. One DaemonSet that does all three signals: scrapes
-                        Prometheus metrics, tails container logs and ships them to Loki,
-                        and receives OTLP traces from services and forwards them to
-                        Tempo.
-                        This replaces what would otherwise be THREE separate agents -
-                        the OpenTelemetry Collector, Promtail, and a metrics scraper.
-                        Promtail is deprecated in favour of Alloy, so this is also the
-                        current path rather than the legacy one.
-                        Services speak plain OTLP to Alloy and know nothing about what
-                        is behind it. cineplex/pkg/otel already emits OTLP and needs no
-                        change.
-                        Install: helm, grafana/alloy, as a DaemonSet.
-                        Cost: ~256Mi PER NODE, so ~768Mi total.
+  ClickHouse            The single store. All three signals - metrics, traces, logs -
+                        live in one columnar database rather than in three purpose-built
+                        ones. That is the whole architectural bet: one store to operate,
+                        one query engine, and joins across signals are cheap because they
+                        are literally the same database.
+                        Needs a coordination service (ClickHouse Keeper, or ZooKeeper on
+                        older charts) - the SigNoz chart brings it.
+                        Cost: ~6Gi and it is by far the largest single consumer. Give it
+                        real disk; with 150G per node this is finally not a problem.
+                        PLACEMENT: pin it. local-path means wherever it lands is where it
+                        lives forever.
 
-  VictoriaMetrics       METRICS STORAGE. Chosen over Prometheus deliberately: same
-                        PromQL, same scrape model, roughly a third of the memory and
-                        materially less disk for the same retention. On 15G nodes that
-                        difference decides whether the stack fits.
-                        Note the vm helm repo is ALREADY configured on the control plane
-                        from a previous attempt - past-you was already thinking this.
-                        Install: helm, vm/victoria-metrics-single. Retention 7d.
-                        Cost: ~1Gi + PVC. PLACEMENT: not node-2.
+  SigNoz                Query service plus the UI. The APM views, service map, alerting
+                        rules and dashboards. One ingress host, one login.
+                        Cost: ~1.5Gi.
 
-  Loki                  LOG STORAGE. Single-binary mode, filesystem backend. Not the
-                        microservices deployment mode - that is for object storage and
-                        real scale, and would be several pods for no benefit here.
-                        Retention MUST be set: 72h. The previous Loki left a PVC that sat
-                        Pending for 377 days; that PVC gets deleted, not reused.
-                        Install: helm, grafana/loki, singleBinary mode.
-                        Cost: ~1Gi + PVC.
+  OTel Collector        The ingest point. SigNoz ships its own, and it speaks plain OTLP -
+                        there is no proprietary agent anywhere in this stack.
+                        THIS IS THE PART THAT MATTERS MOST STRATEGICALLY: our services
+                        emit vanilla OTLP and know nothing about SigNoz. cineplex/pkg/otel
+                        already does this and needs no change. If SigNoz disappoints, the
+                        migration to the Grafana stack is a collector config change and a
+                        new backend - not a single line touched in eight services.
+                        Cost: ~1Gi.
 
-  Tempo                 TRACE STORAGE. Single-binary mode, filesystem backend, same
-                        reasoning as Loki. Retention 24h - traces are the highest-volume
-                        and shortest-useful-life signal here.
-                        The old Tempo left a bound 5Gi PVC in monitoring; delete it.
-                        Install: helm, grafana/tempo.
-                        Cost: ~1Gi + PVC.
+  k8s-infra             SigNoz's DaemonSet for cluster telemetry - node metrics, pod
+                        metrics, container log tailing. This is what makes the
+                        infrastructure half of the Datadog picture appear.
+                        Cost: ~256Mi per node, ~768Mi total.
 
-  Grafana               THE UI. One place for metrics, logs and traces, with the three
-                        wired as datasources and correlated by trace_id so a slow request
-                        goes trace -> logs -> metrics in three clicks. That correlation is
-                        the entire reason to run all three rather than just metrics.
-                        cineplex/grafana-datasources.yaml is a starting point.
-                        Install: helm, grafana/grafana. Ingress host, cert from
-                        cert-manager.
-                        Cost: ~512Mi + small PVC for dashboards.
+  metrics-server        NOT part of SigNoz and currently MISSING from this cluster -
+                        kubectl top and the Metrics API return "Metrics API not
+                        available" today. Required for kubectl top, for HorizontalPod-
+                        Autoscaler, and for any autoscaling the simulator load might
+                        justify later. Tiny.
+                        Cost: ~128Mi.
 
-  WHAT IS DELIBERATELY NOT INSTALLED:
-    Prometheus / kube-prometheus-stack   VictoriaMetrics replaces it at a third the cost.
-                                         kube-state-metrics and node-exporter are still
-                                         wanted; install those two standalone, Alloy
-                                         scrapes them.
-    OpenTelemetry Collector              Alloy does OTLP receive. Two agents doing one
-                                         job is how the previous stack got confusing.
-    Jaeger                               Tempo does this and lives in Grafana already.
-                                         The orphaned jaegertracing.io CRD gets deleted.
-    Mimir                                VictoriaMetrics is the substitution. Not needed.
+WHERE SIGNOZ FALLS SHORT OF DATADOG, AND HOW EACH GAP GETS FILLED
 
-  Standalone metrics exporters, both tiny, both required for any useful cluster dashboard:
-    kube-state-metrics    object-level metrics - deployments, pods, PVCs   ~128Mi
-    node-exporter         host-level metrics - cpu, memory, disk, network  ~64Mi/node
+  Being honest about this now is cheaper than discovering it at milestone 9. Three
+  Datadog features have no good SigNoz equivalent:
+
+  continuous profiling   Datadog's Continuous Profiler is always-on CPU and memory
+                         profiling in production. SigNoz has no equivalent.
+                         FILL: Pyroscope, standalone, ~2Gi. Go has first-class pprof
+                         support so instrumenting is nearly free, and for a system whose
+                         hot path is lock contention on seat rows, always-on profiling is
+                         not a luxury - it is how you find out WHY p99 moved.
+                         Worth installing. Not in phase 0; add it at milestone 9 when
+                         there is contention worth profiling.
+
+  browser RUM            Datadog RUM captures real user page performance and JS errors.
+                         SigNoz's frontend story is thin.
+                         FILL: OTel browser instrumentation in the React SPA, emitting
+                         OTLP to the same collector. Weaker than Datadog RUM, but it puts
+                         browser spans in the same trace as the backend, which is the
+                         part that actually matters here.
+
+  synthetics             Datadog runs scripted checks from outside.
+                         FILL: k6 on a CronJob hitting the public API, exporting to the
+                         collector. Small, and k6 is worth knowing anyway.
+
+  Everything else - infra metrics, APM, distributed tracing, log search, alerting,
+  dashboards, service map - SigNoz covers natively.
+
 
 DELIVERY
 ........
@@ -189,27 +214,44 @@ DELIVERY
 TOTAL FOOTPRINT
 ...............
 
+Sized for the POST-RESIZE cluster - 40Gi allocated across three VMs, see 0.0 in PHASING.
+
   access        MetalLB 200Mi + ingress-nginx 256Mi                        ~0.5Gi
-  data          CNPG 200Mi + PG 1.5Gi + Redis 256Mi + Strimzi 300Mi
-                + Kafka 1.5Gi                                              ~3.8Gi
-  observability Alloy 768Mi + VM 1Gi + Loki 1Gi + Tempo 1Gi
-                + Grafana 512Mi + ksm/node-exporter 320Mi                  ~4.6Gi
+  data          CNPG 200Mi + Postgres 4Gi + Redis 1Gi + Strimzi 300Mi
+                + Kafka 4Gi                                                ~9.5Gi
+  observability ClickHouse 6Gi + SigNoz 1.5Gi + collector 1Gi
+                + k8s-infra 768Mi + metrics-server 128Mi                   ~9.4Gi
   existing      Argo CD ~1.5Gi + cert-manager 256Mi                        ~1.8Gi
-  services      8 x ~200Mi                                                 ~1.6Gi
-  simulator     variable, this is the dial                                 ~0.5Gi+
+  services      8 x ~256Mi                                                 ~2.0Gi
+  simulator     variable, this is the load dial                            ~2.0Gi
                                                                           --------
-                                                                          ~12.8Gi
+                                                                          ~25.2Gi
 
-Against ~17Gi schedulable. It fits, with roughly 4Gi of headroom, and observability is
-the single largest consumer at over a third of the total. That is why PHASING below
-brings it up in three steps rather than all at once - if memory gets tight, the honest
-lever is dropping Loki first, because logs are the signal you can most afford to lose
-when traces and metrics are both present.
+  later, not phase 0:
+  Pyroscope     continuous profiling, added at milestone 9                  ~2.0Gi
+  Kafka RF=3    two more brokers at milestone 10                            ~8.0Gi
+                                                                          --------
+                                                                          ~35.2Gi
 
-Disk is the tighter constraint and it is entirely a retention question. Every one of
-Kafka, VictoriaMetrics, Loki and Tempo will grow without bound on defaults, and the
-simulator produces continuously by design. Retention caps are set at install time, not
-after the first disk alert.
+Against ~35Gi schedulable after the resize (40Gi allocated, minus ~1.5Gi/node system
+overhead). It fits, including the milestone 9 and 10 additions, which is the entire
+justification for resizing before installing anything.
+
+ON THE CURRENT 21Gi IT WOULD NOT FIT. ClickHouse alone wants 6Gi and Kafka plus Postgres
+another 8Gi; that is two thirds of the present cluster before a single service runs.
+This is why 0.0 comes before 0.3.
+
+RETENTION. With 400G of disk instead of 45G, retention stops being a survival tactic and
+becomes a real choice. Targets, all generous by homelab standards and all still bounded,
+because "unbounded" is how you end up back where this project started:
+
+    metrics    90 days     the cheapest signal per byte, and the one you want history for
+    logs       30 days
+    traces     7 days      highest volume, shortest useful life
+    Kafka      7 days      long enough to replay a topic and rebuild a read model
+
+Every one of these is set at install time. ClickHouse TTLs and Kafka retention are
+configured with the first install, never bolted on after the first disk alert.
 
 
 PART 3 - PHASING
@@ -217,6 +259,43 @@ PART 3 - PHASING
 
 PHASE 0 - PLATFORM. No business logic. Ends with a cluster that is fully observable and
 delivers code from git commit to running pod with no human step.
+
+  0.0  RESIZE THE VMS. Nothing else in phase 0 starts until this is done.
+       The three KVM guests are badly under-provisioned against the host: 14 vCPU,
+       ~21Gi RAM and 45G disk allocated out of 48G RAM and 500G storage. The VMs are
+       using nine percent of the host's disk.
+
+       Target, leaving the host ~8G RAM and ~100G:
+         k8s-ctrl-plane   12G RAM   100G disk
+         k8s-node-1       14G RAM   150G disk
+         k8s-node-2       14G RAM   150G disk    <- equalize it, it is the odd one out
+       vCPU to be decided once the host core count is known.
+
+       ORDER MATTERS AND GETTING IT WRONG TAKES THE CLUSTER DOWN. etcd is a single
+       member living on the control plane, so shutting that VM down stops the entire
+       Kubernetes API. Do the workers first, one at a time, and the control plane last:
+
+         kubectl drain k8s-node-1 --ignore-daemonsets --delete-emptydir-data
+         virsh shutdown k8s-node-1
+         virsh setmaxmem k8s-node-1 14G --config
+         virsh setmem    k8s-node-1 14G --config
+         qemu-img resize /var/lib/libvirt/images/k8s-node-1.qcow2 150G
+         virsh start k8s-node-1
+         # then inside the guest, because qemu-img only grows the virtual disk:
+         sudo growpart /dev/sda 1 && sudo resize2fs /dev/sda1
+         kubectl uncordon k8s-node-1
+
+       Then repeat for node-2, then the control plane - accepting a few minutes of API
+       downtime for that last one, with no drain needed since it runs only control-plane
+       components.
+
+       GOTCHA: growing the qcow2 does nothing visible inside the guest on its own. The
+       partition and then the filesystem each have to be grown, in that order. These are
+       cloud images where sda1 is the large partition and sda14/sda15 are small boot
+       partitions ahead of it, so growpart on partition 1 is the right call.
+
+       EXIT TEST: kubectl get nodes shows the new capacity, and all 23 pods return to
+       Running.
 
   0.1  disk reclaimed, all three nodes                           DONE 2026-08-24
        83/50/43% -> 47/29/16%, ~30G free cluster-wide. See DISK in CLUSTER.md.
@@ -238,14 +317,17 @@ delivers code from git commit to running pod with no human step.
        EXIT TEST: change a string, push, and watch it reach the cluster untouched by hand.
        This is the single most valuable step in phase 0 and it is worth more than it
        looks - every later service is this service with logic added.
-  0.6  observability, in three steps, each proven with hello-service before the next:
-         a) VictoriaMetrics + Grafana + kube-state-metrics + node-exporter + Alloy metrics
-         b) Tempo + Alloy OTLP receive          EXIT TEST: hello-service span in Grafana
-         c) Loki + Alloy log tailing            EXIT TEST: log line correlated to that
-                                                span by trace_id
+  0.6  observability. SigNoz, plus metrics-server which the cluster is missing entirely.
+         a) metrics-server              EXIT TEST: kubectl top nodes returns numbers
+         b) SigNoz - ClickHouse, query service, OTel collector, behind an ingress host
+         c) k8s-infra DaemonSet         EXIT TEST: every node and pod visible in SigNoz
+         d) point hello-service at the collector over OTLP
+            EXIT TEST: one hello-service request shows up as a trace, its log lines
+            correlated to it, and its RED metrics on the service map - all three signals
+            from one request, which is the whole reason for choosing a single store.
        The old stack's leftovers are already gone as of 0.2b, so this installs onto an
-       empty cluster rather than around a corpse. The monitoring, logging and tracing
-       namespaces get recreated here BY ARGO CD, not by hand.
+       empty cluster rather than around a corpse.
+       Set ClickHouse TTLs HERE, at install, not later.
   0.7  data plane. CNPG + Postgres, Redis, Strimzi + Kafka with retention set.
        EXIT TEST: hello-service writes a row, caches it, produces and consumes a Kafka
        message, and all of it is visible in one Grafana trace.
