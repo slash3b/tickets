@@ -261,13 +261,14 @@ PHASE 0 - PLATFORM. No business logic. Ends with a cluster that is fully observa
 delivers code from git commit to running pod with no human step.
 
   0.0  VMs resized                                              DONE 2026-08-24
-       RAM 7.7/7.6/5.7Gi -> 12.5/14.5/14.5G, disk 15/15/15G -> 40/95/95G. Done online
+       RAM 7.7/7.6/5.7Gi -> 12.5/14.5/14.5G, disk 15/15/15G -> 40/120/120G. Done online
        via Proxmox with no downtime and no reboot - qm resize, then growpart and
        resize2fs inside each guest. All three nodes Ready afterwards, zero pods
        disturbed. See VIRTUALIZATION in CLUSTER.md.
-       Total VM disk allocation is 334.51G against a 337.86 GiB LVM-thin pool, chosen
-       so the pool can NEVER be over-committed. Growing anything further means freeing
-       something first - the stopped minikube VM and its snapshots are the slack.
+       Total VM disk allocation is 310.00G against a 337.86 GiB LVM-thin pool, chosen
+       so the pool can NEVER be over-committed. Deleting the minikube VM and the pihole
+       LXC freed ~74G, ~50G of which went to the two workers. ~28G of headroom is left
+       deliberately: cloning k8s-node-tpl for a fourth node would consume 15G of it.
        REMAINING: untaint the control plane so its 12.5G of RAM is schedulable, keeping
        ClickHouse, Kafka and Postgres off it by affinity.
 
