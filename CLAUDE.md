@@ -35,7 +35,10 @@ How to write it:
 - Log destructive and one-way changes with the date, what was deleted, and where the backup
   went (see the TEARDOWN and ARGOCD UPGRADE sections for the shape).
 - Note the gotcha that cost time, so the next upgrade does not rediscover it.
-- Do not put passwords in it. `infra/` has a GitHub remote. Record where a credential lives
-  and the command to reset it instead.
+- Do not put passwords in it. **This repo is PUBLIC on GitHub** — a deliberate choice, so
+  that Argo CD can clone it without credentials, accepted because everything it describes
+  is RFC1918 and reachable only from the LAN. That makes the no-secrets rule absolute
+  rather than a nicety: record where a credential lives and the command to reset it,
+  never the credential.
 
 Update the `Snapshot <date>` line at the top whenever the file changes.

@@ -1,0 +1,84 @@
+# Build changed services, push to Docker Hub, then write the new tag back into
+# deploy/ so Argo CD picks it up.
+#
+# The tag bump is a real commit rather than Argo CD Image Updater, deliberately:
+# every deploy becomes a visible line in git history, and "what is running" is
+# answerable by reading the repo instead of querying the cluster.
+name: build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'services/**'
+      - 'pkg/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/build.yml'
+  workflow_dispatch:
+
+concurrency:
+  # One build at a time: two concurrent runs would race on the tag-bump commit.
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: {go-version: '1.25', cache: true}
+      - run: go vet ./...
+      - run: go test -race -shuffle=on -timeout=2m ./...
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # needed to push the tag-bump commit
+    strategy:
+      matrix:
+        # One entry per service. Adding a service means adding a line here.
+        service: [hello]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/${{ matrix.service }}/Dockerfile
+          push: true
+          build-args: VERSION=${{ github.sha }}
+          tags: |
+            slash3b/tickets-${{ matrix.service }}:${{ github.sha }}
+            slash3b/tickets-${{ matrix.service }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Bump the deployed tag
+        run: |
+          cd deploy/apps/${{ matrix.service }}
+          curl -sSLo /tmp/kustomize.tar.gz \
+            https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz
+          tar -xzf /tmp/kustomize.tar.gz -C /tmp
+          /tmp/kustomize edit set image \
+            slash3b/tickets-${{ matrix.service }}=slash3b/tickets-${{ matrix.service }}:${{ github.sha }}
+
+      - name: Commit the bump
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add deploy/
+          # No change means the image tag was already current — not a failure.
+          git diff --staged --quiet && echo "no tag change" && exit 0
+          git commit -m "deploy(${{ matrix.service }}): ${{ github.sha }} [skip ci]"
+          git push

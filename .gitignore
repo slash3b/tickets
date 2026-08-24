@@ -11,7 +11,8 @@ main
 *.out
 out.html
 
-# the `reeldex` GitHub org profile repo (an earlier name for this project) — its own
-# repo with its own remote. GitHub requires org profile READMEs to live in a standalone
-# repo literally named `.github`, so it cannot be folded into this monorepo.
-/.github/
+# NOTE: /.github/ here is THIS repo's CI directory and is tracked.
+# The `reeldex` GitHub org profile repo that used to live at this path was moved to
+# ../reeldex-dotgithub on 2026-08-24 — it is a separate repo for a separate org, and
+# GitHub requires workflows to live at .github/workflows/, so the two cannot share
+# the path.
