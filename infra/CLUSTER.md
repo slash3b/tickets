@@ -1,6 +1,8 @@
 HOMELAB KUBERNETES - STATE OF THE CLUSTER
 Snapshot 2026-08-24, taken from k8s-ctrl-plane (192.168.1.116).
 Changes made 2026-08-23/24: cineplex removed, slash3b account added, Argo CD 3.0.6 -> 3.5.1.
+2026-08-24: no cluster changes, but disk was measured properly for the first time and the
+prune advice in ARGOCD UPGRADE was found to be wrong - see DISK.
 
 
 ACCESS
@@ -252,8 +254,9 @@ ARGOCD UPGRADE - v3.0.6 to v3.5.1, done 2026-08-24
     Five upgrade hops pull a ~210MB image per component per version onto the same node.
     Kubelet garbage-collected old images, pressure cleared, and the pods scheduled on their
     own after ~4.5 minutes. Nothing needed fixing.
-    Root cause is the 15G disks sitting at ~83% full. Before the next multi-version upgrade:
-      sudo crictl rmi --prune        # on each node, drops unused images
+    Root cause is the 15G disks sitting at ~83% full. See DISK below - the crictl prune
+    originally recorded here does almost nothing on this cluster and the real occupants
+    are elsewhere.
 
   Post-upgrade state:
     argocd-server / repo-server / application-controller /
@@ -325,6 +328,54 @@ TEARDOWN 2026-08-23 - CINEPLEX
     - the manifests in github.com/reeldex/cineplex.git under k8s/base
     - the published image slash3b/cineplex:v1.1.6 on Docker Hub
   To make the removal permanent at the source, delete k8s/base from that repo.
+
+
+DISK - MEASURED 2026-08-24
+--------------------------
+
+  / is 15G on all three nodes, 12G used, 2.5G free, ~83%. This is the binding constraint
+  on everything and it is what taints nodes with DiskPressure and stalls scheduling.
+
+  IT IS NOT CONTAINER IMAGES. Measured on the control plane:
+    sudo crictl images     ->  9 images, 710M total, every one in use
+    /var/lib/containerd    ->  710M
+  So "sudo crictl rmi --prune", which this file used to recommend as the fix, frees
+  approximately nothing today. Keep it in mind for later, when per-commit image tags
+  from a multi-service deployment have actually piled up - it is the right tool, just
+  for a problem this cluster does not have yet.
+
+  What is actually using the disk, control plane, biggest first:
+
+    2.7G  /home/slash3b/go-pkgs      Go module cache. There is a Go toolchain building
+                                     on the control plane. Reclaim: go clean -modcache
+    2.8G  /usr                       the OS. Legitimate.
+    1.2G  /etc/kubernetes/tmp        THREE kubeadm etcd + manifest backups from the
+                                     2026-08-23 upgrade session:
+                                       kubeadm-backup-etcd-2026-08-23-19-08-37
+                                       kubeadm-backup-etcd-2026-08-23-19-16-48
+                                       kubeadm-backup-etcd-2026-08-23-19-25-03
+                                     plus matching manifest and kubelet-config dirs.
+                                     kubeadm writes these on every upgrade and NEVER
+                                     cleans them up. The upgrade is verified and these
+                                     are rollback material for an upgrade that already
+                                     succeeded. Safe to delete.
+    1.1G  /var/cache/apt             Reclaim: sudo apt-get clean
+    710M  /var/lib/containerd        images, see above
+    488M  /home/slash3b/go           GOPATH
+    397M  /var/lib/etcd              the database. Legitimate.
+    115M  journals                   Reclaim: sudo journalctl --vacuum-size=50M
+
+  Roughly 5G is reclaimable in three commands without touching anything the cluster
+  needs. Note the pattern worth remembering: on this cluster disk pressure has come from
+  a developer home directory and from kubeadm's own leftovers, not from Kubernetes
+  workloads.
+
+  MEMORY IS NOT UNIFORM, which matters for placing anything stateful:
+    k8s-ctrl-plane   8039156Ki  (~7.7Gi)
+    k8s-node-1       7943448Ki  (~7.6Gi)
+    k8s-node-2       5928220Ki  (~5.7Gi)   <- notably smaller
+  Anything wanting page cache (a database, a Kafka broker) should avoid node-2, and
+  local-path storage means that placement is permanent once a PVC binds.
 
 
 LEFTOVERS

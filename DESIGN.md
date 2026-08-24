@@ -279,34 +279,111 @@ DATA STORES
                 TEST OF THE DESIGN: flushing Redis in production must cost latency and
                 nothing else. If it can cost correctness, the design is wrong.
 
-  NATS          JetStream. Inter-service events and the feed behind the live seat map.
-    JetStream
-
-Kafka was rejected. Three nodes with 15G disks already at 83 percent cannot host Kafka
-plus this system, and nothing in the design needs partition-level ordering or log
-replay at Kafka's scale. NATS JetStream gives durable at-least-once delivery in a
-fraction of the footprint. Revisit only if a lesson genuinely requires Kafka semantics.
+  Kafka         Inter-service events and the feed behind the live seat map. See its own
+                section - on this hardware it is the component that needs the most care.
 
 Hold expiry is driven by a sweeper polling Postgres for active holds past expires_at, not
-by any TTL mechanism in Redis or NATS. Boring, correct, and observable.
+by any TTL mechanism in Redis or Kafka. Boring, correct, and observable.
+
+
+KAFKA
+-----
+
+Chosen over NATS deliberately, and the reason is not throughput - it is that Kafka's
+model contains a lesson this system cannot avoid learning.
+
+  Seat events for one event MUST stay ordered. held-then-sold arriving as sold-then-held
+  corrupts every read model downstream. Ordering in Kafka means keying by event_id so a
+  given event's events always land on one partition.
+
+  But a partition is also the unit of parallelism. So keying by event_id means ONE
+  PARTITION TAKES THE ENTIRE LADY GAGA ON-SALE while the others sit idle. You cannot fix
+  this by adding partitions, because the key decides placement, not the count.
+
+  That is the hot partition problem, it is unavoidable once you demand per-key ordering,
+  and it is exactly the shape of this system's worst case. Wrestling with it - key by
+  (event_id, section) and give up cross-section ordering? isolate hot events onto their
+  own topic? relax ordering and make consumers commutative? - is a large part of why
+  Kafka is here at all. NATS would have hidden the problem behind subject fan-out.
+
+Secondary lessons that come free: consumer group rebalancing, offset management and what
+"at-least-once" really costs, log compaction for the seat-status projection, and replay
+of a topic from offset zero to rebuild a read model from scratch.
+
+HOW IT IS RUN HERE
+
+  Kafka 4.x in KRaft mode. NO ZOOKEEPER - it was removed in Kafka 4.0. Most of the
+  received wisdom about Kafka being too heavy for small clusters predates this and is
+  now wrong; dropping ZK removes an entire stateful ensemble.
+
+  Strimzi operator. Kafka becomes CRDs - Kafka, KafkaTopic, KafkaUser - which means
+  topics live in deploy/ under git like everything else, and Argo CD manages them.
+  Costs one operator pod. Worth it, and operating a stateful system through an operator
+  is itself part of the point.
+
+  ONE broker, replication factor 1, to begin with. This buys nothing in reliability and
+  is honest about that: a broker loss loses the log. Move to three brokers with RF=3 and
+  min.insync.replicas=2 at the milestone where ISR shrink, leader election and unclean
+  leader election become the thing being learned - not before, because until then it is
+  three times the disk for no lesson.
+
+  local-path storage pins the broker to one node permanently, same as Postgres. Node-2
+  has noticeably less RAM than the other two (5.9Gi vs 8Gi); Kafka should not land there.
+
+RETENTION IS THE WHOLE GAME ON THIS HARDWARE
+
+  Kafka's defaults assume a real cluster and will eat a 15G node alive. The simulator
+  produces continuously, forever, by design. Defaults of 7-day retention and 1GB
+  segments are simply not survivable here. Set, explicitly, on every topic:
+
+    retention.ms       1 to 6 hours, not days. Nothing here needs yesterday's events.
+    segment.bytes      64-128MB, not 1GB. Retention only deletes CLOSED segments, so a
+                       1GB segment on a low-volume topic is never closed and therefore
+                       never deleted, no matter what retention.ms says. This is the
+                       single most common way a small Kafka fills a disk.
+    retention.bytes    a hard per-partition cap. Belt and braces - it is the only
+                       setting that bounds worst case when a burst outruns time-based
+                       retention.
+
+  The seat-status projection topic is the exception: log compaction rather than deletion,
+  keyed by seat, so it keeps exactly the current status of every seat and can rebuild the
+  read model from scratch without unbounded growth.
+
+  Broker heap gets set explicitly, around 1G. Do not let it default and do not let it
+  size itself from a node whose memory it is sharing with everything else.
 
 
 EVENTS
 ------
 
 At-least-once. Every consumer must be idempotent; assume every message arrives twice.
+Every topic below names its partition key, because on Kafka the key is a design decision
+and not a detail - it fixes both ordering and where load lands.
 
-  inventory.seat.held        {event_id, seat_ids, hold_id, expires_at}
-  inventory.seat.released    {event_id, seat_ids, hold_id, reason}
-  inventory.seat.sold        {event_id, seat_ids, order_id}
-  orders.created             {order_id, hold_id, user_id, amount}
-  orders.confirmed           {order_id, event_id, seat_ids}
-  orders.failed              {order_id, reason}
-  payments.succeeded         {payment_id, order_id, amount}
-  payments.failed            {payment_id, order_id, reason}
+  topic                  key           payload
+  ---------------------  ------------  --------------------------------------------
+  inventory.seat.held    event_id      {event_id, section_id, seat_ids, hold_id,
+                                        expires_at}
+  inventory.seat.released event_id     {event_id, section_id, seat_ids, hold_id,
+                                        reason}
+  inventory.seat.sold    event_id      {event_id, section_id, seat_ids, order_id}
+  orders.created         order_id      {order_id, hold_id, user_id, amount}
+  orders.confirmed       order_id      {order_id, event_id, seat_ids}
+  orders.failed          order_id      {order_id, reason}
+  payments.succeeded     order_id      {payment_id, order_id, amount}
+  payments.failed        order_id      {payment_id, order_id, reason}
 
-The inventory.seat.* stream is what gateway fans out to browsers. It is the only stream
-the frontend cares about.
+  inventory.seat.status  seat_id       COMPACTED. Current status of every seat, the
+                                       rebuildable source for the seat-map read model.
+
+The inventory.seat.* topics are what gateway fans out to browsers, and they are the only
+ones the frontend cares about.
+
+The orders.* and payments.* topics key by order_id, which spreads perfectly - orders are
+independent of each other and nothing needs cross-order ordering. The inventory topics
+key by event_id and therefore do not spread at all during an on-sale. That asymmetry is
+deliberate and is the thing to go and measure at milestone 9: same cluster, same load,
+one set of topics idle and one partition on fire.
 
 
 PUBLIC API
@@ -414,7 +491,7 @@ Monorepo. Go workspace at the root.
   tpl/                  becomes the new-service generator, or is deleted.
 
 Each service owns its Dockerfile. Nothing imports another service's internal package -
-they talk over gRPC or NATS, and pkg/ is the only shared code.
+they talk over gRPC or Kafka, and pkg/ is the only shared code.
 
 
 DELIVERY
@@ -459,11 +536,29 @@ HOMELAB CONSTRAINTS
 
 From infra/CLUSTER.md, and these are real limits on the design, not footnotes:
 
-  3 nodes, 15G disks at ~83 percent full. RUN sudo crictl rmi --prune ON EVERY NODE
-  BEFORE the first multi-service rollout. Five Argo CD upgrade hops were enough to put
-  every node under DiskPressure and stall scheduling for four minutes. Seven services
-  with per-commit image tags will be far worse. Disk is the binding constraint on this
-  whole project and should be solved properly before it bites.
+  3 nodes, 15G disks at ~83 percent full, 2.5G free. Disk is THE binding constraint on
+  this project, and adding Kafka makes it the first thing to fix rather than a thing to
+  watch. Measured on the control plane 2026-08-24, the 12G is NOT container images -
+  crictl reports 9 images totalling 710M and every one is in use, so the crictl prune
+  advice previously recorded here would have freed roughly nothing. The actual
+  occupants, and roughly 5G is reclaimable in three commands:
+
+    2.7G  /home/slash3b/go-pkgs        Go module cache. A Go toolchain is building on
+                                       the control plane; go clean -modcache.
+    1.2G  /etc/kubernetes/tmp          three kubeadm etcd backups from the 2026-08-23
+                                       upgrade session. kubeadm leaves these behind and
+                                       never cleans them up. Pure garbage once the
+                                       upgrade is verified, which it is.
+    1.1G  /var/cache/apt               apt-get clean.
+    488M  /home/slash3b/go             GOPATH.
+
+  Do that before Kafka goes anywhere near the cluster. crictl prune stays worth running
+  LATER, once per-commit image tags from seven services have actually accumulated - it
+  is the right tool for a problem this cluster does not have yet.
+
+  Memory is the second constraint and it is not uniform: ctrl-plane and node-1 have 8Gi,
+  node-2 has 5.9Gi. Kafka and Postgres both want page cache and both pin to a node via
+  local-path. Neither belongs on node-2.
 
   Single-member etcd, no backup job. The cluster is one bad afternoon from total loss.
   Nothing here should be irreplaceable.
@@ -496,12 +591,19 @@ MILESTONES
   3  orders. The saga, crash recovery, the paid-to-confirmed gap.
   4  catalog + gateway. First real HTTP API.
   5  simulator, steady mode. First continuous load.
-  6  containerise everything, deploy via Argo CD to the homelab.
+  6  containerise everything, deploy via Argo CD to the homelab. Reclaim disk FIRST and
+     stand up Kafka via Strimzi with retention set correctly from the very first topic -
+     a Kafka installed with defaults on this hardware will fill a node before you have
+     finished reading about it.
   7  web. The live seat map.
   8  arenas and concerts. Second venue kind, sections, a 20,000-seat chart, on_sale_at
      in the future for the first time.
   9  on-sale mode. The Lady Gaga test. Break it, fix it, write down what broke, and only
-     then decide whether it needs a waiting room.
+     then decide whether it needs a waiting room. This is where the hot partition stops
+     being a paragraph in this document and starts being a graph.
+  10 three brokers, RF=3, min.insync.replicas=2. ISR shrink, leader election, and what
+     happens to producers when a broker dies mid-on-sale. Only worth doing once there is
+     disk headroom for it.
 
 Milestone 1 is deliberately unglamorous. If the seat-claim primitive is wrong, every
 milestone after it is built on sand, and it is far cheaper to find that out with a
@@ -523,3 +625,10 @@ OPEN QUESTIONS
   - Do orders and payments stay separate services, or is that a split made for the sake
     of having services? Revisit after milestone 3 and be willing to merge them.
   - Where does the React build get served from - nginx sidecar, or embedded in gateway?
+  - The hot partition, and there is no obviously right answer: key inventory topics by
+    (event_id, section_id) and accept that cross-section ordering is lost, put hot events
+    on a dedicated topic, or make the seat-map consumers commutative so ordering stops
+    mattering. Do not decide this now. Decide it at milestone 9 holding a graph.
+  - Do the 15G disks get grown? Everything above is working around a limit that may
+    simply be fixable at the hypervisor, and if it is, that is a far better use of an
+    afternoon than tuning retention.
