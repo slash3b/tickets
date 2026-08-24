@@ -2,10 +2,11 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: hello
 resources:
-  - namespace.yaml
-  - deployment.yaml
+- namespace.yaml
+- deployment.yaml
 # CI rewrites newTag here on every push to main. This line is the record of what
 # is actually deployed.
 images:
-  - name: ghcr.io/slash3b/tickets-hello
-    newTag: latest
+- name: ghcr.io/slash3b/tickets-hello
+  newName: ghcr.io/slash3b/tickets-hello
+  newTag: a12b8ac3d31b03a43c9eebcbae016062f59e4646
