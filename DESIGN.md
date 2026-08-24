@@ -656,9 +656,10 @@ HOMELAB CONSTRAINTS
 
 From infra/CLUSTER.md, and these are real limits on the design, not footnotes:
 
-  3 nodes, 15G disks at ~83 percent full, 2.5G free. Disk is THE binding constraint on
-  this project, and adding Kafka makes it the first thing to fix rather than a thing to
-  watch. Measured on the control plane 2026-08-24, the 12G is NOT container images -
+  3 nodes, 15G disks. AS OF 2026-08-24 THIS IS NO LONGER THE BINDING CONSTRAINT: the
+  cluster was cleaned out and now sits at 47/29/16 percent with ~30G free. Memory is the
+  constraint now, and node-2's 5.7Gi against the others' 7.6Gi is what drives placement.
+  The history below is kept because the diagnosis is the useful part. Measured on the control plane 2026-08-24, the 12G is NOT container images -
   crictl reports 9 images totalling 710M and every one is in use, so the crictl prune
   advice previously recorded here would have freed roughly nothing. The actual
   occupants, and roughly 5G is reclaimable in three commands:
