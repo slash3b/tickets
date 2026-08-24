@@ -32,6 +32,18 @@ spec:
       # CRDs large enough to exceed the 262144-byte annotation limit that
       # client-side apply writes — the same trap the Argo CD 3.x upgrade hit.
       - ServerSideApply=true
+      # WITHOUT THIS THE APP IS PERMANENTLY OutOfSync. The chart renders explicit
+      # empty strings — priorityClassName: "" and an env var with value: "" — and
+      # those fields are omitempty in Kubernetes' Go structs, so the API server
+      # drops them on write. Desired has them, live never will, and Argo re-syncs
+      # forever, which also destroys OutOfSync as a signal: real drift becomes
+      # indistinguishable from this noise.
+      #
+      # ServerSideDiff compares against a server-side apply DRY RUN, so it sees
+      # what the server would actually store rather than what the chart emitted.
+      # Better than ignoreDifferences path-by-path, which would need brittle
+      # container/env array indices.
+      - ServerSideDiff=true
   # ClickHouse and its operator take a while to converge on first install.
   retry:
     limit: 5
