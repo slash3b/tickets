@@ -399,9 +399,9 @@ VIRTUALIZATION - PROXMOX
     THE HOST freezes at once, with a real risk of corruption. Total allocation is
     deliberately kept UNDER the pool size so this cannot happen:
 
-      total allocated across all VM disks   260.00G
-      pool size                             337.86 GiB      ~78G of headroom
-      actual data in the pool               14.47%  (~49 GiB)
+      total allocated across all VM disks   310.00G
+      pool size                             337.86 GiB      ~28G of headroom
+      actual data in the pool               14.71%  (~50 GiB)
 
     Do not allocate past the pool size. As of 2026-08-24 there is ~78G of headroom,
     freed by deleting the minikube VM and the pihole LXC. The only remaining slack after
@@ -412,8 +412,8 @@ VIRTUALIZATION - PROXMOX
 
     id   name             vCPU   RAM       disk
     800  k8s-ctrl-plane      6   12500M     40G
-    801  k8s-node-1          4   14500M     95G
-    803  k8s-node-2          4   14500M     95G
+    801  k8s-node-1          4   14500M    120G
+    803  k8s-node-2          4   14500M    120G
     802  k8s-node-tpl        -    1024M     15G   stopped, template
     900  debian-template     -    1024M     15G   stopped, template
 
@@ -451,14 +451,35 @@ VIRTUALIZATION - PROXMOX
 
     Verified after: all three nodes Ready, zero pods not Running, /healthz ok.
 
-  SCHEDULING CONSTRAINT
+  SCHEDULING CONSTRAINT - THE CONTROL PLANE TAINT
 
-    k8s-ctrl-plane is TAINTED node-role.kubernetes.io/control-plane, so only node-1 and
-    node-2 accept ordinary workloads. That is 29G of worker RAM for a stack that wants
-    ~25G, which is too tight. The intent is to untaint the control plane to reclaim its
-    12.5G, while keeping ClickHouse, Kafka and Postgres OFF it by node affinity - etcd is
-    sensitive to disk latency and sharing a spindle with ClickHouse is a reliable way to
-    destabilise the API server.
+    k8s-ctrl-plane carries the kubeadm default taint
+      node-role.kubernetes.io/control-plane:NoSchedule
+    so only node-1 and node-2 accept ordinary workloads. That is 29G of worker RAM, or
+    ~26G after kubelet reserves, for a planned stack wanting ~25G. Roughly 96% committed
+    with no room for a rolling update, while the control plane runs its own components
+    in about 2G of its 12.5G and idles the rest.
+
+    ARGUMENT FOR KEEPING IT is etcd. It is brutally sensitive to disk fsync latency - it
+    wants p99 under about 10ms for its write-ahead log. Put something IO-heavy beside it
+    and fsyncs slow, heartbeats miss, leader elections fail, and the API goes flaky in a
+    way that reads like a network fault.
+
+    ARGUMENT AGAINST IT, AND IT IS SPECIFIC TO THIS BOX: all three nodes are guests on
+    ONE Proxmox host sharing ONE LVM-thin pool on ONE physical disk. ClickHouse on node-1
+    already contends with etcd on the control plane at the physical layer. The taint
+    isolates CPU and memory within a guest; it does nothing about disk, because that
+    isolation was always partly imaginary here.
+
+    So only the CPU and memory risk is new, and requests and limits handle that.
+    DECISION: untaint, and keep ClickHouse, Kafka and Postgres off the control plane by
+    node affinity so only stateless things land there.
+
+      remove   kubectl taint nodes k8s-ctrl-plane node-role.kubernetes.io/control-plane-
+      restore  kubectl taint nodes k8s-ctrl-plane \
+                 node-role.kubernetes.io/control-plane=:NoSchedule
+
+    Fully reversible either way. NOT YET APPLIED as of this snapshot.
 
   MISSING: there is no metrics-server. kubectl top and the Metrics API return
   "Metrics API not available", and no HorizontalPodAutoscaler can work without it.
