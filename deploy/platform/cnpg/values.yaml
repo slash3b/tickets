@@ -1,0 +1,17 @@
+# CloudNativePG operator — Postgres as a Kubernetes resource.
+#
+# Chosen over a bare StatefulSet or the Bitnami chart because it makes the things
+# that are hard about running a database into first-class objects: backup, restore,
+# point-in-time recovery, failover and rolling minor upgrades are CRs rather than
+# runbooks. Operating a database through an operator is itself one of the things
+# worth learning here.
+resources:
+  requests: {cpu: 50m, memory: 128Mi}
+  limits:   {memory: 256Mi}
+
+# No Prometheus Operator on this cluster — SigNoz collects via its own agent, which
+# scrapes from pod annotations instead. See the Cluster manifest.
+monitoring:
+  podMonitorEnabled: false
+  grafanaDashboard:
+    create: false

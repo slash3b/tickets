@@ -1,0 +1,7 @@
+[Unit]
+Description=Restore /etc/resolv.conf symlink if replaced
+Documentation=https://github.com/slash3b/tickets/blob/main/infra/CLUSTER.md
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/resolv-guard

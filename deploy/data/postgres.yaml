@@ -1,0 +1,70 @@
+# The source of truth for every service in this system.
+#
+# ONE INSTANCE, and that is a deliberate, honest choice rather than an oversight.
+# CloudNativePG will happily run three with automatic failover, but local-path
+# storage binds a volume to one node permanently — a replica on another node could
+# never take over the primary's data, so replicas here would buy availability
+# theatre and nothing else. Postgres becomes genuinely highly available on this
+# cluster only when storage stops being node-local.
+#
+# NO BACKUPS CONFIGURED. CloudNativePG does continuous backup and point-in-time
+# recovery to object storage, and there is no object storage here. That is the same
+# gap etcd has. Nothing in this system should be irreplaceable.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: tickets-pg
+  namespace: data
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  instances: 1
+
+  # PINNED TO node-1 ON PURPOSE. ClickHouse already owns node-2, and the control
+  # plane is off-limits for anything IO-heavy since untainting it removed the only
+  # thing separating workloads from etcd. local-path makes this permanent the moment
+  # the volume binds, so it is chosen once, deliberately, rather than left to the
+  # scheduler to stack everything on one node.
+  affinity:
+    nodeSelector:
+      kubernetes.io/hostname: k8s-node-1
+
+  storage:
+    size: 20Gi
+    storageClass: local-path
+
+  resources:
+    requests: {cpu: 100m, memory: 512Mi}
+    limits:   {memory: 2Gi}
+
+  bootstrap:
+    initdb:
+      database: tickets
+      owner: tickets
+      # DESIGN.md: schema per service, one database. No cross-schema joins and no
+      # cross-schema foreign keys — that restraint is what keeps splitting these
+      # into separate databases later a config change instead of a rewrite.
+
+  postgresql:
+    parameters:
+      # Deliberately modest. This is a learning system under one showing a day, not
+      # a production OLTP box; these exist so the numbers are chosen rather than
+      # inherited.
+      max_connections: "200"
+      shared_buffers: "256MB"
+      work_mem: "8MB"
+      # Every statement over 200ms gets logged. On a system whose whole point is
+      # seat-row contention, the slow query log IS the evidence.
+      log_min_duration_statement: "200"
+
+  monitoring:
+    # No Prometheus Operator here. SigNoz's node agent scrapes pods carrying these
+    # annotations, which is how Postgres metrics reach the same store as everything
+    # else. CloudNativePG serves them on :9187.
+    enablePodMonitor: false
+
+  inheritedMetadata:
+    annotations:
+      signoz.io/scrape: "true"
+      signoz.io/port: "9187"
+      signoz.io/path: "/metrics"

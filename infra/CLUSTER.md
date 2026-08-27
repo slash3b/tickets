@@ -1,10 +1,14 @@
 HOMELAB KUBERNETES - STATE OF THE CLUSTER
-Snapshot 2026-08-24, taken from k8s-ctrl-plane (192.168.1.116).
+Snapshot 2026-08-27, taken from k8s-ctrl-plane (192.168.1.116).
 Changes made 2026-08-23/24: cineplex removed, slash3b account added, Argo CD 3.0.6 -> 3.5.1.
 2026-08-24: CLEAN SLATE. All observability leftovers deleted - 2 PVCs, 13 CRDs, 4 empty
 namespaces, 3 helm repos, stale images on every node. Disk 83/50/43% -> 47/29/16%, ~30G
 free cluster-wide. Worker host keys verified out-of-band and key auth fixed. See CLEANUP,
 DISK and ACCESS. No change to anything that was actually running.
+2026-08-27: control-plane DNS fixed at the root, not patched again. resolv.conf now
+points at the systemd-resolved STUB, which makes tailscaled pick its resolvedManager
+and stop wanting the file; resolv-guard.path restores the symlink if anything takes it
+anyway. See CONTROL PLANE DNS.
 
 
 ACCESS
@@ -413,35 +417,93 @@ TEARDOWN 2026-08-23 - CINEPLEX
   To make the removal permanent at the source, delete k8s/base from that repo.
 
 
-CONTROL PLANE DNS - BROKEN BY TAILSCALE, FIXED 2026-08-27
----------------------------------------------------------
+CONTROL PLANE DNS - TAKEN BY TAILSCALE, FIXED FOR GOOD 2026-08-27
+------------------------------------------------------------------
 
   SYMPTOM: pods scheduled on k8s-ctrl-plane could not pull images.
     Failed to pull ... lookup ghcr.io on [fd7a:115c:a1e0::53]:53: server misbehaving
   fd7a:115c:a1e0::/48 is Tailscale's range - that is MagicDNS failing on public names.
 
-  CAUSE: tailscale had REPLACED /etc/resolv.conf, a systemd-resolved symlink, with a
+  FIRST READ: tailscale had REPLACED /etc/resolv.conf, a systemd-resolved symlink, with a
   static file pointing only at its own resolvers. Both workers were unaffected; only
   the control plane runs tailscaled.
 
-  WHY IT APPEARED WHEN IT DID, and this is the useful part: it was latent for months.
-  The control plane was tainted, so no application pod ever ran there and it never had
-  to pull an application image. UNTAINTING IT on 2026-08-24 made it a scheduling target
-  for the first time, and the very next deploy landed there and failed. Removing a taint
-  does not only add capacity - it starts exercising code paths on that node that were
-  never exercised before.
+  ROOT CAUSE, found later the same day, and this is the part that matters: replacing the
+  symlink was the symptom, not the trigger. tailscaled logs its DNS mode decision at
+  every start, and it read:
+    dns: [resolved-ping=yes rc=resolved resolved=not-in-use ret=direct]
+  resolv.conf pointed at /run/systemd/resolve/resolv.conf - the UPLINK file, which lists
+  1.1.1.1 directly. tailscale checks whether resolved is really in the query path by
+  looking for 127.0.0.53. Not finding it, it concluded resolved was installed but
+  bypassed (resolved=not-in-use) and fell back to a manager that owns /etc/resolv.conf as
+  a regular file: "direct" on 08-24, "openresolv" from 08-25 on - the latter also failing
+  with health(warnable=dns-read-os-config-failed): exit status 1.
+  So restoring the symlink fixed nothing structural. tailscale re-picked a file-owning
+  mode at EVERY start; the trap was re-armed on every boot, upgrade and re-auth.
 
-  FIX:
-    sudo tailscale set --accept-dns=false      # stop tailscale owning DNS
-    sudo ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
-    sudo systemctl restart systemd-resolved
-  accept-dns=false alone is NOT enough: tailscale replaced the symlink with a regular
-  file and does not restore it, so the symlink has to be recreated by hand.
-  Tailscale connectivity is unaffected; only MagicDNS short names stop resolving here.
+  WHY IT APPEARED WHEN IT DID: it was latent for months. The control plane was tainted,
+  so no application pod ever ran there and it never had to pull an application image.
+  UNTAINTING IT on 2026-08-24 made it a scheduling target for the first time, and the
+  very next deploy landed there and failed. Removing a taint does not only add capacity -
+  it starts exercising code paths on that node that were never exercised before.
+
+  THE FIX, two layers.
+
+  Layer 1, prevention - point resolv.conf at the resolved STUB, not the uplink file:
+    sudo ln -sfn /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+    sudo systemctl restart tailscaled
+  The decision trace then reads:
+    dns: [resolved-ping=yes rc=resolved resolved=file nm=no resolv-conf-mode=stub ret=systemd-resolved]
+    dns: using *dns.resolvedManager
+  In that mode tailscale configures DNS over D-Bus against the tailscale0 link and has no
+  reason to open /etc/resolv.conf at all. The failure mode is gone by construction rather
+  than by preference - which is the difference between this and accept-dns=false, a
+  setting that any re-auth can flip back.
+  COST, accepted deliberately: the node now resolves through 127.0.0.53, so it depends on
+  systemd-resolved being up. Before, if resolved died the last-written file still said
+  1.1.1.1 and resolution kept working. This trades a rare silent failure for a rarer
+  obvious one. resolved is enabled, and the stub is Debian's stock arrangement.
+
+  Layer 2, guard - /usr/local/sbin/resolv-guard, fired by resolv-guard.path (enabled, so
+  it survives reboot). If /etc/resolv.conf stops being a symlink to the stub it is
+  restored, the event is logged under journal tag resolv-guard, and a copy of whatever
+  took the file is kept at /root/resolv.conf.stolen-<timestamp> - so the next incident
+  arrives with evidence attached instead of needing this investigation again.
+  Layer 1 has exactly one hole and this is what covers it: mode selection runs at
+  tailscaled start and reads live state, so if resolved happens to be down at that moment
+  tailscale sees resolved-ping=no and goes direct again.
+  Tested by replacing the symlink with a static file: restored in ~200ms.
+    journalctl -t resolv-guard      # has it ever fired?
+  Empty output means layer 1 has held. Any output means layer 1 fell back - read the
+  saved copy and check why resolved was down.
+  The script and both units are checked in at infra/node/control-plane/ - the node was
+  otherwise the only copy.
+
+  DO NOT point kubelet at the stub. /var/lib/kubelet/config.yaml keeps
+    resolvConf: /run/systemd/resolve/resolv.conf
+  the uplink file, because pods cannot reach the node's own 127.0.0.53. This is also why
+  the original incident only ever hit containerd image pulls and never pod DNS -
+  containerd reads /etc/resolv.conf, kubelet never did.
+
+  MagicDNS stays off here (accept-dns=false) as a second line of defence; the node is
+  reached at 192.168.1.116 over the LAN and does not need tailnet short names. The cost
+  is log noise in tailscaled - "dns: resolver: forward: no upstream resolvers set,
+  returning SERVFAIL", a few dozen an hour. It is benign and is the direct consequence of
+  accept-dns=false, not a fault. Layer 1 is what would make turning MagicDNS back on safe
+  if it is ever wanted: resolved would route only *.ts.net to tailscale and everything
+  else to 1.1.1.1, instead of the old all-or-nothing.
   Backup of the tailscale-written file: /root/resolv.conf.tailscale-2026-08-27.bak
 
-  WATCH FOR: a tailscale upgrade or re-auth may take resolv.conf back. If image pulls
-  start failing on the control plane again, check /etc/resolv.conf is still a symlink.
+  NOT auto-upgraded: unattended-upgrades covers only origin=Debian and Debian-Security,
+  and tailscale ships from its own apt source (/etc/apt/sources.list.d/tailscale.list).
+  A tailscale upgrade here is therefore always a deliberate act, never a surprise at
+  03:00. Re-check the decision trace after any such upgrade:
+    journalctl -u tailscaled | grep 'dns: using' | tail -2
+
+  ROLLBACK, nothing here is one-way and no package was installed or removed:
+    sudo ln -sfn /run/systemd/resolve/resolv.conf /etc/resolv.conf
+    sudo systemctl disable --now resolv-guard.path
+    sudo systemctl restart tailscaled
 
   SSH HOST KEY also changed around the same reboot. Verified out-of-band through the
   Proxmox guest agent rather than over the connection being trusted:

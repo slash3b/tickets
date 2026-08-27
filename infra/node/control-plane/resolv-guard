@@ -1,0 +1,19 @@
+#!/bin/bash
+# Restore /etc/resolv.conf if anything replaces the systemd-resolved symlink.
+#
+# Tailscale took this file over on 2026-08-27 and broke every containerd image
+# pull on this node. The structural fix is resolv.conf pointing at the resolved
+# stub, which makes tailscaled pick its resolvedManager (D-Bus) and leave the
+# file alone. This guard covers the remaining window: if resolved is down when
+# tailscaled starts, tailscaled falls back to a mode that owns the file again.
+# See infra/CLUSTER.md, "CONTROL PLANE DNS".
+set -u
+target=/run/systemd/resolve/stub-resolv.conf
+
+[ "$(readlink /etc/resolv.conf 2>/dev/null || true)" = "$target" ] && exit 0
+
+stamp=$(date +%F-%H%M%S)
+was=$(readlink /etc/resolv.conf 2>/dev/null || echo "regular file, not a symlink")
+cat /etc/resolv.conf > "/root/resolv.conf.stolen-$stamp" 2>/dev/null || true
+ln -sfn "$target" /etc/resolv.conf
+logger -t resolv-guard "restored /etc/resolv.conf -> $target (was: $was; copy kept at /root/resolv.conf.stolen-$stamp)"

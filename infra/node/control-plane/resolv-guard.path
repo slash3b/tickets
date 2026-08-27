@@ -1,0 +1,10 @@
+[Unit]
+Description=Watch /etc/resolv.conf for replacement
+Documentation=https://github.com/slash3b/tickets/blob/main/infra/CLUSTER.md
+
+[Path]
+PathChanged=/etc/resolv.conf
+Unit=resolv-guard.service
+
+[Install]
+WantedBy=multi-user.target

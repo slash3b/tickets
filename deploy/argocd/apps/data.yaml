@@ -1,0 +1,26 @@
+# The data plane: Postgres now, Redis and Kafka to follow. Wave 4 — after the CNPG
+# operator (wave 1) has supplied the postgresql.cnpg.io CRDs.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: data
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/slash3b/tickets.git
+    targetRevision: main
+    path: deploy/data
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions:
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff: {duration: 20s, factor: 2, maxDuration: 3m}
