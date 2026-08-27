@@ -31,6 +31,23 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # A real Postgres, so the store tests actually run here instead of skipping.
+    # The oversell test is NOT run in CI - it carries a build tag and is triggered
+    # by hand with `make oversell`. It fires a thousand concurrent goroutines at a
+    # database; that belongs in a decision to run it, not in every push.
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: tickets
+          POSTGRES_PASSWORD: tickets
+          POSTGRES_DB: tickets
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U tickets"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://tickets:tickets@127.0.0.1:5432/tickets?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
