@@ -1,5 +1,5 @@
-# hello-service. Wave 4: after the access layer (0-2) and the Argo CD ingress (3),
-# because its own Ingress needs both ingress-nginx and the cert-manager issuer.
+# hello-service. Wave 4: after the access layer (0-2) and the Gateway (3), because
+# its HTTPRoute has to attach to a Gateway that already exists.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

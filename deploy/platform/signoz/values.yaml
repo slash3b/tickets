@@ -114,17 +114,8 @@ signoz:
     enabled: true
     size: 2Gi
 
+  # Routing lives in deploy/gateway/signoz-httproute.yaml as an HTTPRoute, not here.
+  # ingress-nginx was retired by Kubernetes in March 2026 and the cluster moved to
+  # Envoy Gateway and the Gateway API on 2026-08-27.
   ingress:
-    enabled: true
-    className: nginx
-    annotations:
-      cert-manager.io/cluster-issuer: tickets-lan-ca
-    hosts:
-      - host: signoz.tickets.lan
-        paths:
-          - path: /
-            pathType: Prefix
-            port: 8080
-    tls:
-      - hosts: [signoz.tickets.lan]
-        secretName: signoz-tls
+    enabled: false

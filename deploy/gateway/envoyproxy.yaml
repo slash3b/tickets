@@ -29,7 +29,7 @@ spec:
       envoyService:
         externalTrafficPolicy: Cluster
         annotations:
-          metallb.io/loadBalancerIPs: "192.168.1.241"
+          metallb.io/loadBalancerIPs: "192.168.1.240"
       envoyDeployment:
         replicas: 1
         container:
