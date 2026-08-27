@@ -783,8 +783,21 @@ MILESTONES
      The bank runs as a service using the same pkg/ as hello, which is the first
      evidence that "every service is hello with logic added" is true rather than
      aspirational.
-     REMAINING: the payments store (payments, idempotency_keys, webhook_events),
-     webhook delivery and its dedup, and the background reconciler.
+     PAYMENTS STORE AND RECONCILER DONE 2026-08-27. Five more tests:
+       the idempotency key is DERIVED from the order id, so a crash between
+         creating a payment and hearing back reproduces the same key on restart -
+         anything random or clock-based silently defeats the bank's idempotency
+       a duplicated request cannot create a second payment (UNIQUE on order_id,
+         enforced by the database rather than by callers remembering)
+       a timed-out charge lands in `unknown`, the reconciler asks the bank what
+         actually happened, and resolves it to succeeded WITHOUT charging again
+       when the bank genuinely never saw the request, the reconciler charges
+       an unreachable bank never produces `failed` - that would tell a customer
+         who may already have been charged that their payment did not happen
+     `unknown` is a fourth state, not a variant of `failed`. Collapsing the two is
+     the most expensive mistake available here.
+     MILESTONE 2 COMPLETE apart from webhooks, which wait for orders to exist -
+     there is nothing to notify yet.
   3  orders. The saga, crash recovery, the paid-to-confirmed gap.
   4  catalog + gateway. First real HTTP API.
   5  simulator, steady mode. First continuous load.
