@@ -1,0 +1,89 @@
+# Kafka 4.3.1 in KRaft mode — NO ZOOKEEPER.
+#
+# ZooKeeper was removed from Kafka in 4.0, and Strimzi 1.x is KRaft-only. Most
+# advice about Kafka being too heavy for a small cluster predates this and is now
+# simply wrong: dropping ZooKeeper removes an entire stateful ensemble. (The
+# ZooKeeper still running on node-2 belongs to ClickHouse, not to Kafka.)
+#
+# ONE NODE, dual-role: it is both controller and broker. Replication factor 1
+# everywhere, which buys no durability and is honest about that — a broker loss
+# loses the log. Three brokers with RF=3 and min.insync.replicas=2 come at
+# milestone 10, when ISR shrink and leader election are the thing being learned
+# rather than three times the disk for no lesson.
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaNodePool
+metadata:
+  name: dual-role
+  namespace: data
+  labels:
+    strimzi.io/cluster: tickets-kafka
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  replicas: 1
+  roles: [controller, broker]
+  storage:
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: 20Gi
+        class: local-path
+        deleteClaim: false
+  template:
+    pod:
+      # node-1, alongside Postgres. node-2 already carries ClickHouse and is the
+      # busiest machine; the control plane takes nothing stateful. local-path
+      # makes this permanent once the volume binds.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values: [k8s-node-1]
+  resources:
+    requests: {cpu: 200m, memory: 1Gi}
+    limits:   {memory: 2Gi}
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: Kafka
+metadata:
+  name: tickets-kafka
+  namespace: data
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+    strimzi.io/node-pools: enabled
+    strimzi.io/kraft: enabled
+spec:
+  kafka:
+    version: 4.3.1
+    listeners:
+      - name: plain
+        port: 9092
+        type: internal
+        tls: false
+    config:
+      # Single node, so every replication factor is 1. Stated explicitly because
+      # the defaults are 3 and the cluster would refuse to create internal topics.
+      offsets.topic.replication.factor: 1
+      transaction.state.log.replication.factor: 1
+      transaction.state.log.min.isr: 1
+      default.replication.factor: 1
+      min.insync.replicas: 1
+
+      # RETENTION IS SET AT INSTALL, NOT AFTER THE FIRST DISK ALERT.
+      #
+      # log.segment.bytes matters more than it looks: retention only ever deletes
+      # CLOSED segments, so a 1GB default segment on a low-volume topic is never
+      # closed and therefore never deleted no matter what retention.ms says. That
+      # is the single most common way a small Kafka fills a disk.
+      log.retention.hours: 168          # 7 days — long enough to replay a topic
+      log.segment.bytes: 134217728      # 128MB, not the 1GB default
+      log.retention.bytes: 2147483648   # 2GB per partition, a hard backstop
+  entityOperator:
+    # Gives us KafkaTopic and KafkaUser CRs, which is what puts topic definitions
+    # and their retention in git rather than in a broker's memory.
+    topicOperator: {}
+    userOperator: {}

@@ -1,0 +1,10 @@
+# Strimzi — Kafka as Kubernetes resources.
+#
+# The reason this is worth an operator, beyond the StatefulSet: KafkaTopic becomes
+# a CR, so topics live in git under deploy/ and Argo CD manages them. "Which topics
+# exist and with what retention" becomes a question answered by reading the repo
+# rather than by running kafka-topics.sh against a broker.
+watchAnyNamespace: true
+resources:
+  requests: {cpu: 100m, memory: 256Mi}
+  limits:   {memory: 512Mi}

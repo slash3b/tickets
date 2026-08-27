@@ -1,0 +1,37 @@
+# Strimzi operator. Wave 1: supplies the kafka.strimzi.io CRDs that the Kafka
+# cluster in wave 4 depends on.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: strimzi-operator
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - repoURL: https://strimzi.io/charts/
+      chart: strimzi-kafka-operator
+      targetRevision: 1.2.0
+      helm:
+        valueFiles:
+          - $values/deploy/platform/strimzi/values.yaml
+    - repoURL: https://github.com/slash3b/tickets.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: strimzi-system
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jqPathExpressions:
+        - '.spec.template.spec.containers[].env[].valueFrom.resourceFieldRef.divisor'
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - RespectIgnoreDifferences=true
