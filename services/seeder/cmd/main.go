@@ -13,6 +13,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -72,7 +73,17 @@ func run() error {
 	inv := inventorystore.New(pool)
 
 	// Tomorrow evening, on sale now.
-	startsAt := time.Now().Add(24 * time.Hour).Truncate(time.Hour)
+	//
+	// SEED_DAYS_AHEAD exists so a showing can be created on demand without waiting
+	// for 03:00 or editing the CronJob. The daily run leaves it unset and gets 1.
+	// It earns its place because the day's seats DO sell out — the simulator
+	// drained all 96 on 2026-08-27 — and once they have, there is nothing left to
+	// hold, buy, or trace until the next cron fires.
+	days := 1
+	if n, err := strconv.Atoi(env.Get("SEED_DAYS_AHEAD", "")); err == nil && n > 0 {
+		days = n
+	}
+	startsAt := time.Now().AddDate(0, 0, days).Truncate(time.Hour)
 
 	existing, err := cat.CountEventsStartingOn(ctx, startsAt)
 	if err != nil {
