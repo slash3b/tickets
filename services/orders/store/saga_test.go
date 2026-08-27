@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	_ "embed"
 	"errors"
 	"os"
 	"testing"
@@ -12,8 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-//go:embed schema.sql
-var schemaSQL string
 
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
@@ -28,7 +25,7 @@ func newTestStore(t *testing.T) *Store {
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	if _, err := pool.Exec(ctx, schemaSQL); err != nil {
+	if _, err := pool.Exec(ctx, SchemaSQL); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	// The resumer processes every in-flight order, so tests must not see each

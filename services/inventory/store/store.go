@@ -140,6 +140,54 @@ func (s *Store) holdOnce(ctx context.Context, eventID uuid.UUID, seats []uuid.UU
 	return holdID, nil
 }
 
+// OpenEvent makes seats available for sale.
+//
+// Catalog knows which seats a venue has; inventory decides what "available"
+// means. Keeping the write here preserves the rule that inventory is the ONLY
+// writer of seat status anywhere in the system — including the initial load,
+// where it would be tempting to let catalog do it directly.
+//
+// Idempotent: opening an event twice does not reset seats that are already held
+// or sold, which matters because "was this event already opened?" is exactly the
+// question a retried admin action cannot answer.
+func (s *Store) OpenEvent(ctx context.Context, eventID uuid.UUID, seatIDs []uuid.UUID) (int, error) {
+	if len(seatIDs) == 0 {
+		return 0, errors.New("no seats to open")
+	}
+
+	tag, err := s.db.Exec(ctx,
+		`INSERT INTO inventory.event_seats (event_id, seat_id, status)
+		 SELECT $1, unnest($2::uuid[]), 'available'
+		 ON CONFLICT (event_id, seat_id) DO NOTHING`,
+		eventID, seatIDs)
+	if err != nil {
+		return 0, fmt.Errorf("open event: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+// SeatStatuses returns the current status of specific seats, for the read model.
+func (s *Store) SeatStatuses(ctx context.Context, eventID uuid.UUID, seatIDs []uuid.UUID) (map[uuid.UUID]string, error) {
+	rows, err := s.db.Query(ctx,
+		`SELECT seat_id, status FROM inventory.event_seats
+		  WHERE event_id = $1 AND seat_id = ANY($2)`, eventID, seatIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make(map[uuid.UUID]string, len(seatIDs))
+	for rows.Next() {
+		var id uuid.UUID
+		var status string
+		if err := rows.Scan(&id, &status); err != nil {
+			return nil, err
+		}
+		out[id] = status
+	}
+	return out, rows.Err()
+}
+
 // Convert moves a hold from `active` to `converting`, which STOPS THE SHORT TTL.
 //
 // Called when payment goes in flight. From here the expiry sweeper will not touch

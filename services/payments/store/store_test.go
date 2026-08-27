@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	_ "embed"
 	"net/http/httptest"
 	"os"
 	"testing"
@@ -14,8 +13,6 @@ import (
 	"github.com/slash3b/tickets/services/payments/bankclient"
 )
 
-//go:embed schema.sql
-var schemaSQL string
 
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
@@ -32,7 +29,7 @@ func newTestStore(t *testing.T) *Store {
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	if _, err := pool.Exec(ctx, schemaSQL); err != nil {
+	if _, err := pool.Exec(ctx, SchemaSQL); err != nil {
 		t.Fatalf("apply schema: %v", err)
 	}
 

@@ -824,7 +824,31 @@ MILESTONES
      Inventory gained Commit, which is idempotent because the resumer retries it
      after a crash and "did my commit land before I died?" is a question the
      caller often cannot answer.
-  4  catalog + gateway. First real HTTP API.
+  4  catalog + gateway.                                        DONE 2026-08-27
+     Catalog owns venues, sections, seats, events and prices. Gateway is the
+     browser-facing BFF and owns no data - it calls catalog for what EXISTS and
+     inventory for what is AVAILABLE, which is the one place those two are
+     assembled, because a seat's identity and a seat's availability are
+     deliberately owned by different services.
+
+     THE WHOLE SYSTEM NOW WORKS END TO END, proven through the HTTP API against a
+     real database and a real fake bank: browse events, list sections, load ONE
+     section's seat map, hold three seats together, place the order, and watch the
+     saga confirm it and the seats turn sold.
+
+     Also guarded at the HTTP layer:
+       losing a race is 409, not 500 - the SPA must tell "someone beat you to it"
+         apart from "the server is broken", and only one of those means retry
+       a declined payment gives the seats straight back
+
+     THERE IS NO WHOLE-EVENT SEAT ENDPOINT and there never will be. At 20,000
+     seats that is a denial of service against your own database. Sections were
+     built into the API from the first line rather than retrofitted at milestone 8.
+
+     Catalog does NOT write inventory.event_seats. It reports which seats exist;
+     inventory opens them. Inventory remains the only writer of seat status
+     anywhere in the system, including the initial load, where letting catalog do
+     it directly would have been the obvious shortcut.
   5  simulator, steady mode. First continuous load.
   6  containerise everything, deploy via Argo CD to the homelab. Reclaim disk FIRST and
      stand up Kafka via Strimzi with retention set correctly from the very first topic -

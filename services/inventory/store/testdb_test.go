@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	_ "embed"
 	"os"
 	"testing"
 	"time"
@@ -11,8 +10,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-//go:embed schema.sql
-var schemaSQL string
 
 // newTestStore connects to the database named by DATABASE_URL and applies the
 // schema. Tests SKIP rather than fail when it is unset, so `go test ./...` stays
@@ -38,7 +35,7 @@ func newTestStore(t *testing.T) (*Store, uuid.UUID) {
 	if err := pool.Ping(ctx); err != nil {
 		t.Fatalf("ping: %v", err)
 	}
-	if _, err := pool.Exec(ctx, schemaSQL); err != nil {
+	if _, err := pool.Exec(ctx, SchemaSQL); err != nil {
 		t.Fatalf("apply schema: %v", err)
 	}
 	t.Cleanup(pool.Close)
