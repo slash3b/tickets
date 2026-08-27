@@ -29,6 +29,23 @@ spec:
       kind: Deployment
       jqPathExpressions:
         - '.spec.template.spec.containers[].env[].valueFrom.resourceFieldRef.divisor'
+    # The chart declares an EMPTY `properties: {}` on one schema node of the Kafka
+    # CRD. Kubernetes drops empty maps when persisting a CRD schema, so the live
+    # object can never contain it and Argo diffs on it forever — leaving the app
+    # permanently OutOfSync, which destroys OutOfSync as a signal for real drift.
+    #
+    # Found by diffing Argo's own normalizedLiveState against predictedLiveState via
+    # /api/v1/applications/strimzi-operator/managed-resources. Diffing the rendered
+    # chart against the live object points at the wrong fields, because it skips the
+    # normalizers Argo applies first.
+    #
+    # Revisit on chart upgrades: if upstream stops emitting the empty map, delete
+    # this rather than leaving it to mask something real later.
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+      name: kafkas.kafka.strimzi.io
+      jqPathExpressions:
+        - '.spec.versions[].schema.openAPIV3Schema.properties.status.properties.clusterSecurity.properties'
   syncPolicy:
     automated: {prune: true, selfHeal: true}
     syncOptions:
