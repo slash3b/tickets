@@ -71,13 +71,16 @@ clickhouse:
         <asynchronous_metric_log remove="1"/>
         <session_log remove="1"/>
         <blob_storage_log remove="1"/>
-        <query_log>
-          <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
-        </query_log>
-        <metric_log>
-          <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
-        </metric_log>
       </clickhouse>
+
+      <!-- NOTE: do NOT add <query_log><ttl>...</ttl></query_log> here. The chart
+           already specifies an <engine> for these system tables, and ClickHouse then
+           requires the TTL to live INSIDE that engine definition. Supplying a
+           sibling <ttl> is a fatal startup error, not a warning:
+             Code: 36. If 'engine' is specified for system table, TTL parameters
+             should be specified directly inside 'engine'
+           The server exits 36 and crash-loops. query_log and metric_log are small
+           and are left with the chart's own defaults. -->
 
   zookeeper:
     # Required by the ClickHouse operator for coordination even at one shard,
