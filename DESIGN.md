@@ -755,9 +755,16 @@ MILESTONES
 ----------
 
   0  this document, reviewed and agreed
-  1  inventory alone. Schema, conditional-update hold, sweeper, invariant checker, and a
-     concurrency test that fires 1000 goroutines at 10 seats and asserts exactly 10 wins.
-     No HTTP, no k8s, no other service. Prove the core before building around it.
+  1  inventory alone.                                          IN PROGRESS
+     DONE 2026-08-27: schema with the oversell invariant as a CHECK constraint, the
+     conditional-update claim, seat-id sorting plus 40P01 retry, the invariant
+     checker, and the concurrency test. Measured: 1000 goroutines on 10 seats,
+     exactly 10 wins, 7428 attempts/sec, zero errors, under -race. Overlapping
+     three-seat groups hold too.
+     THE OVERSELL TEST IS MANUAL - build tag `oversell`, so `go test ./...` does
+     not compile it and it cannot run by accident. `make oversell` runs it.
+     REMAINING: the expiry sweeper and the hard-deadline sweeper, both singletons.
+     Still no HTTP, no k8s, no other service - the core is proven first.
   2  bank + payments. Idempotency under the timeout-but-succeeded case.
   3  orders. The saga, crash recovery, the paid-to-confirmed gap.
   4  catalog + gateway. First real HTTP API.
