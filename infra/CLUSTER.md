@@ -701,6 +701,46 @@ ACCESS LAYER - GATEWAY API, MIGRATED 2026-08-27
     192.168.1.240  argocd.tickets.lan hello.tickets.lan signoz.tickets.lan
 
 
+DATA PLANE - POSTGRES, INSTALLED 2026-08-27
+-------------------------------------------
+
+  CloudNativePG operator 0.29.0 (Postgres 1.30.0)   ns cnpg-system   Argo, wave 1
+  Cluster tickets-pg                                 ns data          Argo, wave 4
+    PostgreSQL 18.4, ONE instance, PINNED TO k8s-node-1, 20Gi local-path
+    database "tickets" owned by role "tickets"
+
+  SERVICES CNPG CREATES, and the distinction matters when services connect:
+    tickets-pg-rw    the primary. Everything that writes uses this.
+    tickets-pg-ro    replicas only. Empty here - there is one instance.
+    tickets-pg-r     any instance, primary included.
+  Use -rw unless you have a specific reason. With one instance -ro resolves to
+  nothing, so a service pointed at it fails in a way that looks like a network
+  problem.
+
+  CREDENTIALS ARE GENERATED, NEVER IN GIT. secret data/tickets-pg-app holds the
+  application user; tickets-pg-ca, -server and -replication hold TLS material.
+    kubectl -n data get secret tickets-pg-app -o jsonpath='{.data.password}' | base64 -d
+
+  ONE INSTANCE IS DELIBERATE. CNPG runs three with automatic failover, but
+  local-path binds a volume to one node permanently, so a replica on another node
+  could never take over the primary's data. Replicas here would be availability
+  theatre. Postgres becomes genuinely HA on this cluster only when storage stops
+  being node-local.
+
+  NO BACKUPS. CNPG does continuous backup and PITR to object storage, and there is
+  no object storage here. Same gap as etcd. Nothing in this system should be
+  irreplaceable.
+
+  PLACEMENT, chosen once because local-path makes it permanent:
+    node-1   Postgres          node-2   ClickHouse + ZooKeeper
+  The control plane takes no stateful workload - untainting it removed the only
+  thing separating IO-heavy work from etcd.
+
+  METRICS reach SigNoz through inheritedMetadata annotations on the Cluster
+  (signoz.io/scrape, port 9187), not a PodMonitor - there is no Prometheus Operator
+  on this cluster.
+
+
 VIRTUALIZATION - PROXMOX
 ------------------------
 

@@ -401,7 +401,12 @@ delivers code from git commit to running pod with no human step.
        The old stack's leftovers are already gone as of 0.2b, so this installs onto an
        empty cluster rather than around a corpse.
        Set ClickHouse TTLs HERE, at install, not later.
-  0.7  data plane. CNPG + Postgres, Redis, Strimzi + Kafka with retention set.
+  0.7  data plane.
+       POSTGRES DONE 2026-08-27 - CloudNativePG 0.29.0, PostgreSQL 18.4, one
+       instance pinned to node-1, 20Gi, database "tickets". Verified: settings
+       applied, database owned by the right role, rw/ro/r services created,
+       credentials generated into a secret. See DATA PLANE in CLUSTER.md.
+       REMAINING: Redis, then Strimzi + Kafka with retention set at install.
        EXIT TEST: hello-service writes a row, caches it, produces and consumes a Kafka
        message, and all of it is visible in one Grafana trace.
 
