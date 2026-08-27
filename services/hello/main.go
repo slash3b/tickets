@@ -51,18 +51,21 @@ func run() error {
 		endpoint = env.Get("OTEL_EXPORTER_OTLP_ENDPOINT", "")
 	)
 
-	lg, flush := logger.MustNew(service, debug)
-	defer func() { _ = flush() }()
-
 	// SIGTERM is what Kubernetes sends first. Honouring it is what makes a rolling
 	// update invisible instead of a burst of connection resets.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	shutdownObs, err := obs.Setup(ctx, service, version, endpoint)
+	// Observability comes up BEFORE the logger, because the logger needs its
+	// LoggerProvider to tee log records into OTLP. Errors here go to stderr since
+	// there is no logger yet — a deliberate, tiny window.
+	shutdownObs, logProvider, err := obs.Setup(ctx, service, version, endpoint)
 	if err != nil {
 		return fmt.Errorf("observability: %w", err)
 	}
+
+	lg, flush := logger.MustNew(service, debug, logProvider)
+	defer func() { _ = flush() }()
 	lg.Info("observability ready", zap.String("otlp_endpoint", orNone(endpoint)))
 
 	greetings, err := otel.Meter(service).Int64Counter("hello.greetings",

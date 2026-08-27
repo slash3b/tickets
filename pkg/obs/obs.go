@@ -20,9 +20,12 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	otellog "go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/propagation"
+	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -38,7 +41,9 @@ type Shutdown func(context.Context) error
 // endpoint is host:port with NO scheme — "signoz-otel-collector.signoz:4318", not
 // "http://...". The OTLP HTTP exporter rejects a scheme here, which is an easy
 // half hour to lose.
-func Setup(ctx context.Context, service, version, endpoint string) (Shutdown, error) {
+// The returned LoggerProvider is nil when no endpoint is configured; pass it to
+// logger.MustNew, which then logs to stdout only.
+func Setup(ctx context.Context, service, version, endpoint string) (Shutdown, otellog.LoggerProvider, error) {
 	// Propagators are set even with no exporter: they cost nothing and mean an
 	// incoming traceparent header is still honoured.
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
@@ -51,7 +56,7 @@ func Setup(ctx context.Context, service, version, endpoint string) (Shutdown, er
 		semconv.ServiceVersion(version),
 	))
 	if err != nil {
-		return nil, fmt.Errorf("otel resource: %w", err)
+		return nil, nil, fmt.Errorf("otel resource: %w", err)
 	}
 
 	// No endpoint: still install a real TracerProvider, just without an exporter.
@@ -66,7 +71,7 @@ func Setup(ctx context.Context, service, version, endpoint string) (Shutdown, er
 		tp := sdktrace.NewTracerProvider(sdktrace.WithResource(res))
 		otel.SetTracerProvider(tp)
 
-		return tp.Shutdown, nil
+		return tp.Shutdown, nil, nil
 	}
 
 	// WithInsecure: plain HTTP to a collector inside the cluster. Fine here; it
@@ -76,7 +81,7 @@ func Setup(ctx context.Context, service, version, endpoint string) (Shutdown, er
 		otlptracehttp.WithInsecure(),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("otlp trace exporter: %w", err)
+		return nil, nil, fmt.Errorf("otlp trace exporter: %w", err)
 	}
 
 	tp := sdktrace.NewTracerProvider(
@@ -90,7 +95,7 @@ func Setup(ctx context.Context, service, version, endpoint string) (Shutdown, er
 		otlpmetrichttp.WithInsecure(),
 	)
 	if err != nil {
-		return nil, errors.Join(fmt.Errorf("otlp metric exporter: %w", err), tp.Shutdown(ctx))
+		return nil, nil, errors.Join(fmt.Errorf("otlp metric exporter: %w", err), tp.Shutdown(ctx))
 	}
 
 	mp := sdkmetric.NewMeterProvider(
@@ -100,7 +105,21 @@ func Setup(ctx context.Context, service, version, endpoint string) (Shutdown, er
 	)
 	otel.SetMeterProvider(mp)
 
+	logExp, err := otlploghttp.New(ctx,
+		otlploghttp.WithEndpoint(endpoint),
+		otlploghttp.WithInsecure(),
+	)
+	if err != nil {
+		return nil, nil, errors.Join(fmt.Errorf("otlp log exporter: %w", err),
+			tp.Shutdown(ctx), mp.Shutdown(ctx))
+	}
+
+	lp := sdklog.NewLoggerProvider(
+		sdklog.WithResource(res),
+		sdklog.WithProcessor(sdklog.NewBatchProcessor(logExp)),
+	)
+
 	return func(ctx context.Context) error {
-		return errors.Join(tp.Shutdown(ctx), mp.Shutdown(ctx))
-	}, nil
+		return errors.Join(tp.Shutdown(ctx), mp.Shutdown(ctx), lp.Shutdown(ctx))
+	}, lp, nil
 }
