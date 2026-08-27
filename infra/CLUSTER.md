@@ -497,6 +497,44 @@ OBSERVABILITY - SIGNOZ, INSTALLED 2026-08-24
   Rate afterwards: ~200-400/minute. Any log store that ingests its own logs will do
   this; check for it whenever one is installed.
 
+  CLICKHOUSE ATE A WHOLE NODE WITH ITS OWN DIAGNOSTICS - fixed 2026-08-27.
+  Symptom: node-2 at 97% CPU with ZERO queries running, disk 3% -> 48%.
+  Cause: ClickHouse records very detailed telemetry ABOUT ITSELF into system.*_log.
+  After three days:
+    system.zookeeper_log   16.98 GiB   214,005,617 rows   (every ZooKeeper op)
+    system.trace_log        9.83 GiB   470,600,466 rows   (sampling profiler)
+    system.text_log         3.06 GiB   101,683,787 rows
+    ~31 GiB of self-diagnostics against 5.25 GiB of real telemetry.
+  All of it was being continuously merged, which is what consumed the CPU. The log
+  feedback loop above inflated zookeeper_log especially, since every insert is
+  ZooKeeper traffic.
+  Fix: config.d/disable-system-logs.xml in the chart values, remove="1" on each.
+  Result: node-2 97% -> 31% CPU, disk 54G -> 8.9G.
+
+  TWO TRAPS WHILE FIXING IT, both worth remembering:
+
+  1. DO NOT write <query_log><ttl>...</ttl></query_log> as a sibling element. The
+     chart already declares an <engine> for those system tables, and ClickHouse then
+     requires TTL INSIDE the engine definition. A sibling <ttl> is FATAL:
+       Code: 36. If 'engine' is specified for system table, TTL parameters should be
+       specified directly inside 'engine'
+     The server exits 36 and crash-loops. This looked exactly like an OOM crash-loop
+     because MEMORY_LIMIT_EXCEEDED errors were also in the log - the exit code is what
+     distinguishes them. CHECK THE EXIT CODE BEFORE BELIEVING THE LOUDEST ERROR.
+
+  2. A crash-looping ClickHouse cannot be fixed through Argo CD. The chart renders
+     into a ClickHouseInstallation CR, the clickhouse-operator turns that into a
+     StatefulSet, and the operator will not finish reconciling while the host is
+     unhealthy - so a values change never reaches the pod. Deadlock. Break it by
+     editing the live object directly:
+       kubectl -n signoz patch sts chi-signoz-clickhouse-cluster-0-0 ...      (limits)
+       kubectl -n signoz get cm chi-signoz-clickhouse-common-configd -o json  (config)
+     then delete the pod. Push the same change through git afterwards so the two agree.
+
+  MEMORY: raised to 6Gi. ClickHouse sets max_server_memory_usage to ~90% of the
+  cgroup limit and a MERGE must fit inside it; at 4Gi it OOMed mid-merge on a large
+  backlog and retried forever.
+
   ARGO CD PERMANENT OutOfSync, fixed with ignoreDifferences in
   deploy/argocd/apps/signoz.yaml. Two server-side defaults the chart never renders:
     volumeClaimTemplates[].apiVersion and .kind   on both StatefulSets
