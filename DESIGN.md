@@ -394,6 +394,12 @@ Symptom is SQLSTATE 40P01. Two mitigations, use both: sort seat ids before sendi
 and retry 40P01 with jitter at the repository layer. Do not "fix" this by taking a table
 lock; that throws away the parallelism the design exists to get.
 
+BUILT AND MEASURED 2026-08-27 in services/inventory/store. 1000 goroutines against 10
+seats: exactly 10 wins, 990 clean losses, zero errors, 7428 attempts/sec under -race.
+Note what that last number does NOT tell you - whether deadlocks occurred and were
+retried, or whether sorting prevented them entirely. Both look like errored=0. If that
+distinction ever matters, count the retries.
+
 READ MODELS ARE NOT AUTHORITATIVE. The seat map the browser renders is a cached,
 event-driven projection and it is allowed to be stale. A user clicking a seat that the
 map showed as free and getting a 409 is CORRECT BEHAVIOUR, not a bug, and the SPA must
