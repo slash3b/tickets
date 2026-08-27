@@ -27,6 +27,30 @@ otelInsecure: true
 presets:
   logsCollection:
     enabled: true
+
+    # STOPS A FEEDBACK LOOP THAT NEARLY TOOK THE CLUSTER DOWN.
+    #
+    # ClickHouse logs every query it runs. The agent collected those logs and
+    # INSERTed them into ClickHouse, which logged the insert, which was collected
+    # again. Measured at ~20,000 records/minute on a completely idle cluster -
+    # 41,912 of 42,000 in a two-minute sample came from the clickhouse container
+    # alone - with ClickHouse pinned near its 4Gi limit and burning three CPU
+    # cores doing nothing but ingesting its own chatter.
+    #
+    # The chart's blacklist.signozLogs is already true and does NOT catch this:
+    # the ClickHouse pods are created by the clickhouse-operator from a
+    # ClickHouseInstallation CR, not by the Helm release, so they never carry the
+    # labels that filter matches on. Excluding the container by name is what works.
+    #
+    # The collector and the agent stay collected - they are small, and their logs
+    # are how you debug the pipeline itself.
+    blacklist:
+      enabled: true
+      signozLogs: true
+      namespaces:
+        - kube-system
+      containers:
+        - clickhouse
   hostMetrics:
     enabled: true
   kubeletMetrics:
