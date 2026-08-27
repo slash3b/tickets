@@ -55,7 +55,10 @@ jobs:
       - uses: actions/setup-go@v5
         with: {go-version: '1.25', cache: true}
       - run: go vet ./...
-      - run: go test -race -shuffle=on -timeout=2m ./...
+      # -p 1 serialises packages: several share one database and truncate it on
+      # setup, so running them concurrently makes one package delete another's
+      # fixtures. See the note in the makefile.
+      - run: go test -race -shuffle=on -p 1 -timeout=3m ./...
 
   build:
     needs: test

@@ -12,8 +12,15 @@ build: ## compile everything
 vet: ## go vet
 	go vet ./...
 
+## -p 1 SERIALISES PACKAGES, and that is required, not a preference.
+## go test runs packages in parallel by default. Several of these share one
+## database and truncate it on setup, so in parallel the gateway's
+## `TRUNCATE catalog.venues CASCADE` deletes rows the catalog test just created —
+## which surfaces as a foreign key violation in a package that did nothing wrong.
+## The alternative is a database per package; -p 1 is the honest cheap answer at
+## this size, and the tests stay fast because they are.
 test: ## unit tests. Needs DATABASE_URL for the store tests; skips them without it.
-	DATABASE_URL="$(PG_URL)" go test -race -shuffle=on -timeout=2m ./...
+	DATABASE_URL="$(PG_URL)" go test -race -shuffle=on -p 1 -timeout=3m ./...
 
 ## The oversell test is NOT part of `make test` and not part of CI.
 ## It fires 1000 concurrent goroutines at a database — a load test wearing a unit
