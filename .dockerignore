@@ -1,0 +1,11 @@
+# The build context is uploaded to the daemon on every build. Without this the
+# whole repo went — 23MB, of which 4.4MB was .git, none of it used by the build.
+*
+!go.mod
+!go.sum
+!pkg/
+!services/
+
+# Never ship test files or fixtures into an image.
+**/*_test.go
+**/testdata/
