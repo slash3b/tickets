@@ -924,6 +924,19 @@ MILESTONES
      app.tickets.lan and not the bare tickets.lan: the Gateway listener and the
      cert cert-manager issues from it are both *.tickets.lan, and a wildcard does
      not match the apex.
+  7b INSTRUMENTATION, added 2026-08-27 after SigNoz sat empty for three days.
+     Setting up the SDK and instrumenting the code are two different jobs, and
+     only the first one had been done. See OBSERVABILITY in infra/CLUSTER.md.
+
+     Spans now come from: every gateway and bank route (named after the ROUTE
+     PATTERN, so ids never become span names), every database query, inventory.Hold
+     with attempts and won/lost, each saga state, and each simulator session as the
+     ROOT of everything below it.
+
+     LOSING A RACE IS NOT AN ERROR SPAN. It is the expected outcome on a contended
+     seat. Marking it failed would make a healthy on-sale look like an outage,
+     which is the fastest way to make people stop trusting the traces.
+
   8  arenas and concerts. Second venue kind, sections, a 20,000-seat chart, on_sale_at
      in the future for the first time.
   9  on-sale mode. The Lady Gaga test. Break it, fix it, write down what broke, and only

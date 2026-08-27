@@ -547,6 +547,43 @@ OBSERVABILITY - SIGNOZ, INSTALLED 2026-08-24
   ENDPOINT FOR WORKLOADS - host:port, NO scheme, the OTLP HTTP exporter rejects one:
     signoz-otel-collector.signoz.svc.cluster.local:4318
 
+  THE SECOND TRAP, and it looked exactly like the first. From 2026-08-24 to
+  2026-08-27 SigNoz said "You are not sending traces yet" while logs and metrics
+  arrived normally. Nothing was broken. pkg/obs built a TracerProvider, a
+  MeterProvider and three OTLP exporters, installed them globally - and NO SERVICE
+  EVER STARTED A SPAN OR CREATED AN INSTRUMENT. Only the hello canary did.
+  Everything was wired and nothing was instrumented, and from the UI that is
+  indistinguishable from a broken collector.
+
+  The logs and metrics that WERE arriving came from the k8s-infra DaemonSet
+  scraping /var/log/pods and the kubelet. That is infrastructure telemetry. It
+  arrives whether or not a single service is instrumented, so "Logs ingestion is
+  active" is not evidence that anything of yours is reporting.
+
+  HOW TO TELL THE DIFFERENCE, without guessing, ask ClickHouse directly:
+    kubectl -n signoz exec pod/chi-signoz-clickhouse-cluster-0-0-0 -c clickhouse -- \
+      clickhouse-client -q "SELECT serviceName, name, count() \
+        FROM signoz_traces.distributed_signoz_index_v3 \
+        WHERE timestamp > now() - INTERVAL 15 MINUTE GROUP BY serviceName, name"
+  App metrics live in signoz_metrics.distributed_samples_v4, metric_name LIKE
+  'tickets%'. If serviceName only ever shows collector components, the services
+  are not instrumented - do not go looking at the collector.
+
+  VERIFIED 2026-08-27 in the cluster, a full purchase end to end:
+    POST /api/holds -> inventory.Hold -> the conditional UPDATE that claims a seat
+    POST /api/orders -> saga.created -> saga.awaiting_payment -> saga.paid ->
+      saga.confirmed, with POST bank.bank.svc.cluster.local crossing into the bank
+      service's own POST /authorize span - 114ms of a 119ms step was the fake bank
+  Metrics flowing: tickets.holds, tickets.orders. tickets.hold.contention exists
+  but has no points, which is correct - nothing has deadlocked yet, and an OTel
+  counter reports nothing until its first Add.
+
+  RESOURCE ATTRIBUTES come from OTEL_RESOURCE_ATTRIBUTES in each Deployment, read
+  by resource.WithFromEnv. Spans now carry deployment.environment.name=homelab and
+  the emitting k8s.pod.name. The manifests build that string with downward-API
+  $(VAR) expansion, which ONLY works when the referenced variables are declared
+  EARLIER in the same env list - a later definition expands to the literal text.
+
   THE SETUP TRAP, and it cost real time. SigNoz will not configure its collector
   until an ORGANISATION EXISTS, and an org is only created by registering the first
   user in the UI. Until then:
@@ -726,6 +763,10 @@ THE APPLICATION - DEPLOYED 2026-08-27
     workers     every singleton         replicas 1, strategy Recreate
     simulator   the load                https://sim.tickets.lan  (/stats, /config)
     seeder      CronJob 03:00 daily     one showing, idempotent
+                SEED_DAYS_AHEAD=N to create one on demand, N days out. The daily
+                run leaves it unset. It exists because the day's 96 seats DO sell
+                out - the simulator drained them on 2026-08-27 - and after that
+                every request is a browse and half the system emits no traces.
     web         the seat map, React     https://app.tickets.lan
 
   THE SEAT MAP IS SERVED AS STATIC FILES AND NOTHING ELSE. nginx holds the built
