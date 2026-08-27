@@ -206,13 +206,37 @@ DELIVERY
                         component and per service. Adding a service becomes adding a file.
                         Cost: zero new.
 
-  GitHub Actions        Runs outside the cluster, costs it nothing. Matrix build over
-                        changed services only, push to Docker Hub, then commit the new
-                        image tag back to deploy/overlays/homelab. Argo sees the commit
-                        and syncs.
+  GitHub Actions        Runs outside the cluster, costs it nothing. Matrix over
+                        services, then commit the new image tag back into that
+                        service's kustomization.yaml. Argo sees the commit and syncs.
                         Deliberately NOT Argo CD Image Updater: having CI commit the tag
                         makes every deploy a visible commit in git history, which is
                         worth more here than the automation saves.
+
+                        ONE SHARED DOCKERFILE at the repo root, parameterised by a
+                        SERVICE build arg. Eight near-identical Dockerfiles would drift
+                        - someone fixes a CVE in one, bumps Go in another, forgets the
+                        rest - and the services differ in their code, not in how they
+                        are packaged. Every service therefore keeps its main package at
+                        services/<name>/cmd/.
+
+  THE TAG BUMP MUST RETRY WITH A REBASE. Every matrix job finishes at roughly the same
+  time and each pushes its own bump, so all but one are rejected non-fast-forward.
+  Without a retry the losers fail in the worst possible way: the image IS built and
+  pushed to ghcr, but deploy/ still points at the old tag, so the service is never
+  rolled out. Worse, if the manifest still says :latest it deploys ANYWAY and everything
+  looks healthy - which is exactly what happened to bank on 2026-08-27 while hello
+  succeeded. Each job edits a different file, so the rebase is always a clean merge.
+
+  VERIFY EVERY NEW SERVICE END TO END, because "CI went green" and "the new code is
+  running" are different claims:
+    1. the image tag exists in ghcr
+    2. deploy/apps/<name>/kustomization.yaml has newTag set to that SHA, not latest
+    3. the Argo application is Synced/Healthy
+    4. THE RUNNING POD'S IMAGE IS THAT SHA:
+         kubectl -n <ns> get pods -o custom-columns=NAME:.metadata.name,IMAGE:.spec.containers[0].image
+       Only step 4 settles it. A pod happily running :latest hides a bump that never
+       landed, and steps 1-3 all pass while it does.
 
 TOTAL FOOTPRINT
 ...............
