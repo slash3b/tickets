@@ -25,8 +25,14 @@ clickhouse:
     size: 40Gi          # of ~110G free on a worker; retention is what really bounds this
 
   resources:
-    requests: {cpu: 200m, memory: 1Gi}
-    limits:   {memory: 4Gi}
+    requests: {cpu: 200m, memory: 2Gi}
+    # 6Gi, not 4Gi. ClickHouse sets its internal max_server_memory_usage to ~90% of
+    # the cgroup limit, and a MERGE of large parts must fit inside that. At 4Gi it
+    # OOMed mid-merge on the backlog the log feedback loop created, crash-looped,
+    # and retried the same merge forever — a startup deadlock, not a slow start.
+    # node-2 has 14G and is otherwise idle, so this is cheap insurance against a
+    # database that cannot start because it cannot compact.
+    limits:   {memory: 6Gi}
 
   # DISABLE CLICKHOUSE'S OWN SELF-DIAGNOSTIC TABLES.
   #
