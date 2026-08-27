@@ -1,5 +1,11 @@
 # Kafka 4.3.1 in KRaft mode — NO ZOOKEEPER.
 #
+# NOTE THE API VERSION: Strimzi 1.x graduated these CRDs to kafka.strimzi.io/v1.
+# Every example online still says v1beta2, and Argo CD rejects it with
+#   The Kubernetes API could not find version "v1beta2" of kafka.strimzi.io/Kafka
+# The strimzi.io/node-pools and strimzi.io/kraft annotations are gone for the same
+# reason — in 1.x that is the only mode, so opting into it is meaningless.
+#
 # ZooKeeper was removed from Kafka in 4.0, and Strimzi 1.x is KRaft-only. Most
 # advice about Kafka being too heavy for a small cluster predates this and is now
 # simply wrong: dropping ZooKeeper removes an entire stateful ensemble. (The
@@ -10,7 +16,7 @@
 # loses the log. Three brokers with RF=3 and min.insync.replicas=2 come at
 # milestone 10, when ISR shrink and leader election are the thing being learned
 # rather than three times the disk for no lesson.
-apiVersion: kafka.strimzi.io/v1beta2
+apiVersion: kafka.strimzi.io/v1
 kind: KafkaNodePool
 metadata:
   name: dual-role
@@ -54,15 +60,13 @@ spec:
     -Xms: 512m
     -Xmx: 1024m
 ---
-apiVersion: kafka.strimzi.io/v1beta2
+apiVersion: kafka.strimzi.io/v1
 kind: Kafka
 metadata:
   name: tickets-kafka
   namespace: data
   annotations:
     argocd.argoproj.io/sync-wave: "4"
-    strimzi.io/node-pools: enabled
-    strimzi.io/kraft: enabled
 spec:
   kafka:
     version: 4.3.1
