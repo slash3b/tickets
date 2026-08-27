@@ -23,7 +23,11 @@ spec:
   hostnames:
     - signoz.tickets.lan
   rules:
-    - backendRefs:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
         - group: ""
           kind: Service
           name: signoz

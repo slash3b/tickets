@@ -21,7 +21,11 @@ spec:
   hostnames:
     - hello.tickets.lan
   rules:
-    - backendRefs:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
         - group: ""
           kind: Service
           name: hello
