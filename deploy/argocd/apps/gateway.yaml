@@ -1,0 +1,29 @@
+# The Gateway and its routes. SEPARATE FROM platform-manifests ON PURPOSE.
+#
+# platform-manifests is wave 1, but GatewayClass/Gateway/HTTPRoute are CRDs that
+# arrive with Envoy Gateway in wave 2. Putting these in wave 1 would try to create
+# a Gateway before its CRD exists, and the whole app would fail to sync.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gateway
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/slash3b/tickets.git
+    targetRevision: main
+    path: deploy/gateway
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions:
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff: {duration: 20s, factor: 2, maxDuration: 3m}

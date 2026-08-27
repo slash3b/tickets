@@ -4,6 +4,7 @@ namespace: hello
 resources:
 - namespace.yaml
 - deployment.yaml
+- httproute.yaml
 # CI rewrites newTag here on every push to main. This line is the record of what
 # is actually deployed.
 images:

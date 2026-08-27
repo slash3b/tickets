@@ -1,0 +1,28 @@
+# Argo CD behind the Gateway.
+#
+# Replaces the Ingress that used nginx's backend-protocol: HTTPS annotation to speak
+# TLS upstream. Gateway API has no annotation for that — upstream TLS is a
+# BackendTLSPolicy, which needs argocd-server's self-signed CA wired in. The
+# conventional answer behind a TLS-terminating proxy is simpler: run argocd-server
+# with server.insecure=true and let the Gateway own TLS. The hop is inside the pod
+# network and never leaves the node.
+#
+# That flag is set in cm/argocd-cmd-params-cm — see GITOPS in infra/CLUSTER.md.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: argocd
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  parentRefs:
+    - name: tickets
+      namespace: envoy-gateway-system
+      sectionName: https
+  hostnames:
+    - argocd.tickets.lan
+  rules:
+    - backendRefs:
+        - name: argocd-server
+          port: 80

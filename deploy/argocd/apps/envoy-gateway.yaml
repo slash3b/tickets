@@ -1,0 +1,42 @@
+# Envoy Gateway. Wave 2 — same slot ingress-nginx occupied: after MetalLB (0) and
+# the address pool (1), before anything that needs a route.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: envoy-gateway
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - repoURL: docker.io/envoyproxy
+      chart: gateway-helm
+      targetRevision: v1.5.4
+      helm:
+        valueFiles:
+          - $values/deploy/platform/envoy-gateway/values.yaml
+    - repoURL: https://github.com/slash3b/tickets.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: envoy-gateway-system
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jqPathExpressions:
+        - '.spec.template.spec.containers[].env[].valueFrom.resourceFieldRef.divisor'
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions:
+      - CreateNamespace=true
+      # The bundled Gateway API CRDs are large enough to blow the 262144-byte
+      # annotation limit that client-side apply writes.
+      - ServerSideApply=true
+      - RespectIgnoreDifferences=true
+    retry:
+      limit: 5
+      backoff: {duration: 30s, factor: 2, maxDuration: 5m}

@@ -1,0 +1,23 @@
+# Envoy Gateway — replaces ingress-nginx, which the Kubernetes project RETIRED in
+# March 2026 (kubernetes.io/blog/2025/11/11/ingress-nginx-retirement). No further
+# releases, no security fixes. v1.15.1 was the last one and it is what this cluster
+# ran until 2026-08-27.
+#
+# The replacement is not just a different controller, it is a different API. The
+# Ingress API is feature-frozen — which is why every non-trivial behaviour in
+# ingress-nginx was an annotation rather than a field. Gateway API is the successor,
+# and moving now costs three HTTPRoutes; at milestone 7 it would cost eight services
+# plus a WebSocket path.
+#
+# The chart bundles the upstream Gateway API CRDs (crds/gatewayapi-crds.yaml), so
+# installing this installs GatewayClass, Gateway and HTTPRoute too.
+deployment:
+  envoyGateway:
+    resources:
+      requests: {cpu: 50m, memory: 128Mi}
+      limits:   {memory: 256Mi}
+config:
+  envoyGateway:
+    logging:
+      level:
+        default: warn

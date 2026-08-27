@@ -1,0 +1,53 @@
+# The single entry point for every hostname in the cluster.
+#
+# One Gateway with a WILDCARD certificate, rather than the per-host certs the old
+# Ingress objects each carried. cert-manager sees the annotation, issues
+# *.tickets.lan from the internal CA once, and every HTTPRoute attached to this
+# Gateway is covered — adding a service stops involving a certificate at all.
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: envoy
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: tickets
+  namespace: envoy-gateway-system
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+    cert-manager.io/cluster-issuer: tickets-lan-ca
+spec:
+  gatewayClassName: envoy
+  listeners:
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: "*.tickets.lan"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: tickets-lan-wildcard-tls
+      allowedRoutes:
+        # Routes live beside the service they route to, in that service's own
+        # namespace. Without this they could only be defined here, which would
+        # put every service's routing in one file owned by nobody.
+        namespaces:
+          from: All
+    - name: http
+      protocol: HTTP
+      port: 80
+      hostname: "*.tickets.lan"
+      allowedRoutes:
+        namespaces:
+          from: All
+  infrastructure:
+    annotations:
+      # Pin the LAN address. It ends up in /etc/hosts on every machine that talks
+      # to this cluster, so it must not move when the Gateway is recreated.
+      metallb.universe.tf/loadBalancerIPs: "192.168.1.241"

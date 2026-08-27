@@ -3,4 +3,7 @@ kind: Kustomization
 resources:
   - metallb-pool.yaml
   - cert-manager-issuers.yaml
+  # argocd-ingress.yaml stays during the cutover: the old Ingress keeps serving on
+  # .240 until the Gateway is proven on .241. Removed in the same commit that
+  # removes ingress-nginx.
   - argocd-ingress.yaml
