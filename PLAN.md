@@ -406,7 +406,11 @@ delivers code from git commit to running pod with no human step.
        instance pinned to node-1, 20Gi, database "tickets". Verified: settings
        applied, database owned by the right role, rw/ro/r services created,
        credentials generated into a secret. See DATA PLANE in CLUSTER.md.
-       REMAINING: Redis, then Strimzi + Kafka with retention set at install.
+       REDIS DONE 2026-08-27 - plain Deployment, no PVC, allkeys-lru, verified.
+       KAFKA DONE 2026-08-27 - Strimzi 1.2.0, Kafka 4.3.1 KRaft, one dual-role
+       node on node-1, retention set at install. Verified: KafkaTopic CR became a
+       real topic, produced and consumed. PHASE 0.7 COMPLETE.
+       See DATA PLANE in CLUSTER.md.
        EXIT TEST: hello-service writes a row, caches it, produces and consumes a Kafka
        message, and all of it is visible in one Grafana trace.
 
