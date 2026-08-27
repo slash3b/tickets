@@ -64,7 +64,7 @@ jobs:
     strategy:
       matrix:
         # One entry per service. Adding a service means adding a line here.
-        service: [hello]
+        service: [hello, bank]
     steps:
       - uses: actions/checkout@v4
 

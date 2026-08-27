@@ -770,7 +770,21 @@ MILESTONES
      money for seats already sold to someone else.
      MILESTONE 1 COMPLETE. Still no HTTP, no k8s, no other service - the core was
      proven first, which was the entire point of doing it this way round.
-  2  bank + payments. Idempotency under the timeout-but-succeeded case.
+  2  bank + payments.                                          IN PROGRESS
+     DONE 2026-08-27: the adversarial bank (configurable latency, declines,
+     outage, and the timeout-with-side-effect case) plus the client that survives
+     it. Five tests pass under -race, and they encode the semantics:
+       a timeout does NOT double-charge on retry
+       a lost outcome is recoverable by lookup, not by guessing
+       a repeated key does NOT re-roll the verdict - an authorization cannot
+         become a decline because the caller retried
+       an outage reads as UNKNOWN, never as a decline
+       when the bank genuinely never saw it, the caller is told the retry is safe
+     The bank runs as a service using the same pkg/ as hello, which is the first
+     evidence that "every service is hello with logic added" is true rather than
+     aspirational.
+     REMAINING: the payments store (payments, idempotency_keys, webhook_events),
+     webhook delivery and its dedup, and the background reconciler.
   3  orders. The saga, crash recovery, the paid-to-confirmed gap.
   4  catalog + gateway. First real HTTP API.
   5  simulator, steady mode. First continuous load.
