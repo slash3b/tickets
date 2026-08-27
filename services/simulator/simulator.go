@@ -19,6 +19,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/slash3b/tickets/pkg/obs"
 )
 
 func newUUID() string { return uuid.NewString() }
@@ -46,7 +52,7 @@ const (
 
 type Config struct {
 	// ArrivalsPerMinute is the load dial. THE DEFAULT IS DELIBERATELY TINY.
-	ArrivalsPerMinute float64            `json:"arrivals_per_minute"`
+	ArrivalsPerMinute float64             `json:"arrivals_per_minute"`
 	Mix               map[Profile]float64 `json:"mix"`
 	GroupSize         int                 `json:"group_size"`
 }
@@ -91,6 +97,10 @@ func (s *Stats) String() string {
 		s.LostRace.Load(), s.Abandoned.Load(), s.Errors.Load())
 }
 
+// One tracer for the package. otel.Tracer is cheap but not free, and naming it
+// after the service is what groups these spans in the backend.
+var tracer = otel.Tracer("simulator")
+
 type Simulator struct {
 	baseURL string
 	http    *http.Client
@@ -104,9 +114,12 @@ type Simulator struct {
 func New(baseURL string, cfg Config) *Simulator {
 	return &Simulator{
 		baseURL: baseURL,
-		http:    &http.Client{Timeout: 10 * time.Second},
-		cfg:     cfg,
-		rnd:     rand.New(rand.NewPCG(rand.Uint64(), rand.Uint64())),
+		// Traced transport: every call a buyer makes carries traceparent, so the
+		// gateway's spans and the bank's spans hang under the session span below
+		// instead of appearing as unrelated traces.
+		http: obs.HTTPClient(10 * time.Second),
+		cfg:  cfg,
+		rnd:  rand.New(rand.NewPCG(rand.Uint64(), rand.Uint64())),
 	}
 }
 
@@ -184,6 +197,16 @@ func (s *Simulator) pickProfile() Profile {
 // RunOne plays a single buyer's session through the public API.
 func (s *Simulator) RunOne(ctx context.Context, profile Profile) {
 	s.Stats.Sessions.Add(1)
+
+	// ONE SPAN PER SESSION, and it is the root of everything that follows.
+	//
+	// This is what makes the traces worth looking at: a trace is a whole customer
+	// journey - browse, hold, pay - rather than eight disconnected HTTP calls. The
+	// profile is an attribute, so "show me the group buyers who lost a race" is a
+	// filter rather than an archaeology exercise.
+	ctx, span := tracer.Start(ctx, "session "+string(profile),
+		trace.WithAttributes(attribute.String("buyer.profile", string(profile))))
+	defer span.End()
 
 	events, err := s.listEvents(ctx)
 	if err != nil || len(events) == 0 {

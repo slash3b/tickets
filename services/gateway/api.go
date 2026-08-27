@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/slash3b/tickets/pkg/obs"
 )
 
 // Everything gateway needs, declared here by the consumer. Today these are direct
@@ -38,11 +40,11 @@ type Orders interface {
 }
 
 type Event struct {
-	ID        uuid.UUID `json:"id"`
-	Title     string    `json:"title"`
-	Venue     string    `json:"venue"`
-	StartsAt  time.Time `json:"starts_at"`
-	OnSaleAt  time.Time `json:"on_sale_at"`
+	ID       uuid.UUID `json:"id"`
+	Title    string    `json:"title"`
+	Venue    string    `json:"venue"`
+	StartsAt time.Time `json:"starts_at"`
+	OnSaleAt time.Time `json:"on_sale_at"`
 }
 
 type Section struct {
@@ -52,11 +54,11 @@ type Section struct {
 }
 
 type Seat struct {
-	ID       uuid.UUID `json:"id"`
-	Row      string    `json:"row"`
-	Number   int       `json:"number"`
-	X        float64   `json:"x"`
-	Y        float64   `json:"y"`
+	ID     uuid.UUID `json:"id"`
+	Row    string    `json:"row"`
+	Number int       `json:"number"`
+	X      float64   `json:"x"`
+	Y      float64   `json:"y"`
 	// Status is filled from inventory, not catalog. It is ALLOWED TO BE STALE by
 	// the time the browser renders it — a user clicking a seat the map showed as
 	// free and getting a 409 is correct behaviour, not a bug.
@@ -79,14 +81,17 @@ func New(c Catalog, i Inventory, o Orders, holdTTL time.Duration) *API {
 
 func (a *API) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/events", a.listEvents)
-	mux.HandleFunc("GET /api/events/{id}", a.getEvent)
-	mux.HandleFunc("GET /api/events/{id}/sections", a.listSections)
-	mux.HandleFunc("GET /api/events/{id}/sections/{sid}", a.sectionSeats)
-	mux.HandleFunc("POST /api/holds", a.createHold)
-	mux.HandleFunc("DELETE /api/holds/{id}", a.releaseHold)
-	mux.HandleFunc("POST /api/orders", a.createOrder)
-	mux.HandleFunc("GET /api/orders/{id}", a.getOrder)
+	// obs.Route, not mux.HandleFunc: each route gets a server span named after the
+	// PATTERN, so "GET /api/events/{id}" stays one span name instead of one per
+	// event id. See pkg/obs/http.go for why that is done per route.
+	obs.Route(mux, "GET /api/events", a.listEvents)
+	obs.Route(mux, "GET /api/events/{id}", a.getEvent)
+	obs.Route(mux, "GET /api/events/{id}/sections", a.listSections)
+	obs.Route(mux, "GET /api/events/{id}/sections/{sid}", a.sectionSeats)
+	obs.Route(mux, "POST /api/holds", a.createHold)
+	obs.Route(mux, "DELETE /api/holds/{id}", a.releaseHold)
+	obs.Route(mux, "POST /api/orders", a.createOrder)
+	obs.Route(mux, "GET /api/orders/{id}", a.getOrder)
 	return mux
 }
 

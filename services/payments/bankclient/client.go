@@ -11,13 +11,15 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/slash3b/tickets/pkg/obs"
 )
 
 var (
 	// ErrUnknown means the charge may or may not have happened. It is NOT a
 	// failure — treating it as one is how you refuse a customer who has already
 	// been charged. The only correct response is to reconcile.
-	ErrUnknown = errors.New("charge outcome unknown")
+	ErrUnknown  = errors.New("charge outcome unknown")
 	ErrDeclined = errors.New("charge declined")
 )
 
@@ -35,7 +37,9 @@ type Client struct {
 }
 
 func New(baseURL string, timeout time.Duration) *Client {
-	return &Client{base: baseURL, http: &http.Client{Timeout: timeout}}
+	// obs.HTTPClient injects traceparent, so the bank's spans hang under the
+	// order that called it instead of forming a second, orphaned trace.
+	return &Client{base: baseURL, http: obs.HTTPClient(timeout)}
 }
 
 // Authorize charges once per key. Repeating a key never charges twice — that

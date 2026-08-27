@@ -51,10 +51,21 @@ func Setup(ctx context.Context, service, version, endpoint string) (Shutdown, ot
 		propagation.Baggage{},
 	))
 
-	res, err := resource.New(ctx, resource.WithAttributes(
-		semconv.ServiceName(service),
-		semconv.ServiceVersion(version),
-	))
+	// WithFromEnv is what makes OTEL_RESOURCE_ATTRIBUTES work, and its absence is
+	// why every span arrived with no environment and no pod identity. The
+	// deployment manifests set that variable from the downward API, so a span can
+	// be traced back to the exact pod that emitted it without any service knowing
+	// it runs in Kubernetes. WithHost adds host.name for the same reason.
+	//
+	// Order matters: explicit attributes go LAST so a stray environment variable
+	// cannot rename a service out from under it.
+	res, err := resource.New(ctx,
+		resource.WithFromEnv(),
+		resource.WithHost(),
+		resource.WithAttributes(
+			semconv.ServiceName(service),
+			semconv.ServiceVersion(version),
+		))
 	if err != nil {
 		return nil, nil, fmt.Errorf("otel resource: %w", err)
 	}

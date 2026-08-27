@@ -18,8 +18,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/slash3b/tickets/pkg/env"
 	"github.com/slash3b/tickets/pkg/health"
 	"github.com/slash3b/tickets/pkg/logger"
@@ -72,7 +70,11 @@ func run() error {
 	lg, flush := logger.MustNew(service, debug, logProvider)
 	defer func() { _ = flush() }()
 
-	pool, err := pgxpool.New(ctx, dsn)
+	// obs.Pool, not pgxpool.New: every query becomes a span. The conditional
+	// UPDATE that claims a seat is the most interesting thing this system does,
+	// and this is what makes it visible as a timed operation inside the request
+	// that ran it.
+	pool, err := obs.Pool(ctx, dsn)
 	if err != nil {
 		return fmt.Errorf("database: %w", err)
 	}

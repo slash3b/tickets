@@ -18,6 +18,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/slash3b/tickets/pkg/obs"
 )
 
 type Status string
@@ -103,7 +105,10 @@ type authorizeRequest struct {
 // Handler returns the bank's HTTP surface.
 func (b *Bank) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /authorize", b.authorize)
+	// Only /authorize is traced. It is the call the payment saga actually makes,
+	// and the one whose latency is the whole point of this service existing. The
+	// config and lookup endpoints are operator tools, not part of any request path.
+	obs.Route(mux, "POST /authorize", b.authorize)
 	mux.HandleFunc("PUT /config", b.setConfig)
 	mux.HandleFunc("GET /charges/{key}", b.lookup)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {

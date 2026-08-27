@@ -26,6 +26,24 @@ spec:
           env:
             - {name: PORT, value: "8080"}
             - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "signoz-otel-collector.signoz.svc.cluster.local:4318"}
+            # Pod identity from the downward API. These MUST be declared before
+            # OTEL_RESOURCE_ATTRIBUTES below, because Kubernetes only expands
+            # $(VAR) against variables defined earlier in this list — a later
+            # definition silently expands to the literal string.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef: {fieldPath: metadata.name}
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef: {fieldPath: metadata.namespace}
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef: {fieldPath: spec.nodeName}
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              # Read by obs.Setup via resource.WithFromEnv. This is what puts the
+              # environment and the emitting pod on every span, without a line of
+              # Go anywhere knowing that Kubernetes exists.
+              value: "deployment.environment.name=homelab,k8s.cluster.name=homelab,k8s.pod.name=$(POD_NAME),k8s.namespace.name=$(POD_NAMESPACE),k8s.node.name=$(NODE_NAME)"
             - {name: BANK_URL, value: "http://bank.bank.svc.cluster.local"}
             - {name: HOLD_TTL, value: "5m"}
             # Credentials come from the secret CloudNativePG generated. They are

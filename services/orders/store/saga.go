@@ -7,6 +7,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // PaymentOutcome is what orders needs to know about a charge. Three values, not
@@ -55,6 +60,13 @@ func NewSaga(s *Store, inv Inventory, pay Payments) *Saga {
 // Run advances an order as far as it can. It is safe to call repeatedly on the
 // same order — that is precisely what the resumer does after a crash.
 func (sg *Saga) Run(ctx context.Context, orderID uuid.UUID) error {
+	// The saga is a state machine that can run in a request OR later in the
+	// resumer, so the span records where it ended up rather than how long one HTTP
+	// call took. A trace showing created -> awaiting_payment -> paid -> confirmed
+	// as nested spans is the clearest picture of this system there is.
+	ctx, span := tracer.Start(ctx, "saga.Run")
+	defer span.End()
+
 	o, err := sg.store.Get(ctx, orderID)
 	if err != nil {
 		return err
@@ -63,22 +75,41 @@ func (sg *Saga) Run(ctx context.Context, orderID uuid.UUID) error {
 		return fmt.Errorf("order %s not found", orderID)
 	}
 
+	// The state it finishes in is the one thing every reader wants, and it is only
+	// known once the loop stops.
+	defer func() {
+		span.SetAttributes(attribute.String("order.state", string(o.State)))
+		if isTerminal(o.State) {
+			orders.Add(ctx, 1, metric.WithAttributes(attribute.String("state", string(o.State))))
+		}
+	}()
+
 	for {
 		before := o.State
 
+		// One span per STEP, named after the state being left. This is where the
+		// forward-recovery gap becomes visible: a trace that stops at "paid" with
+		// no commit span is exactly the crash the resumer exists to finish.
+		stepCtx, step := tracer.Start(ctx, "saga."+string(o.State))
+
 		switch o.State {
 		case StateCreated:
-			err = sg.convert(ctx, o)
+			err = sg.convert(stepCtx, o)
 		case StateAwaitingPayment:
-			err = sg.charge(ctx, o)
+			err = sg.charge(stepCtx, o)
 		case StatePaid:
-			err = sg.commit(ctx, o)
+			err = sg.commit(stepCtx, o)
 		default:
+			step.End()
 			return nil // terminal, or waiting on something outside the saga
 		}
 		if err != nil {
+			step.RecordError(err)
+			step.SetStatus(codes.Error, "saga step failed")
+			step.End()
 			return err
 		}
+		step.End()
 
 		if o, err = sg.store.Get(ctx, orderID); err != nil {
 			return err
@@ -229,3 +260,19 @@ func (r *Resumer) report(err error) {
 		r.OnError(err)
 	}
 }
+
+// isTerminal reports whether the saga is finished with this order. Only terminal
+// states are counted, so an order is counted ONCE rather than on every pass the
+// resumer makes over it.
+func isTerminal(st State) bool {
+	return st == StateConfirmed || st == StateFailed
+}
+
+var (
+	tracer = otel.Tracer("orders")
+	meter  = otel.Meter("orders")
+
+	orders, _ = meter.Int64Counter("tickets.orders",
+		metric.WithDescription("Orders reaching a terminal state"),
+		metric.WithUnit("{order}"))
+)

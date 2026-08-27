@@ -17,8 +17,10 @@ import (
 	catalogstore "github.com/slash3b/tickets/services/catalog/store"
 	inventorystore "github.com/slash3b/tickets/services/inventory/store"
 	ordersstore "github.com/slash3b/tickets/services/orders/store"
-	paystore "github.com/slash3b/tickets/services/payments/store"
 	"github.com/slash3b/tickets/services/payments/bankclient"
+	paystore "github.com/slash3b/tickets/services/payments/store"
+
+	"github.com/slash3b/tickets/pkg/obs"
 )
 
 // paymentsAdapter is the bridge orders needs: charge an order, once.
@@ -55,7 +57,9 @@ func buildSystem(t *testing.T, bankCfg bank.Config) (*httptest.Server, *catalogs
 	}
 	ctx := context.Background()
 
-	pool, err := pgxpool.New(ctx, dsn)
+	// obs.Pool, not pgxpool.New — the same constructor the binaries use, so the
+	// trace test below sees the database spans production would emit.
+	pool, err := obs.Pool(ctx, dsn)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}

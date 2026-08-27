@@ -16,6 +16,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // ErrSeatsUnavailable means at least one requested seat was not available. The
@@ -62,16 +67,49 @@ func (s *Store) Hold(ctx context.Context, eventID uuid.UUID, seatIDs []uuid.UUID
 	slices.SortFunc(seats, func(a, b uuid.UUID) int { return bytes.Compare(a[:], b[:]) })
 	seats = slices.Compact(seats)
 
+	// THE SPAN THAT MATTERS. Everything else in this system is plumbing around
+	// this call, so it gets recorded with what actually explains its behaviour:
+	// how many seats were asked for, how many attempts it took, and whether it
+	// won or lost. Retries are invisible from the outside - the caller only sees
+	// one slow call - and this is the only place they can be seen at all.
+	ctx, span := tracer.Start(ctx, "inventory.Hold",
+		trace.WithAttributes(attribute.Int("seats.requested", len(seats))))
+	defer span.End()
+
 	var lastErr error
 	for attempt := range maxRetries {
 		id, err := s.holdOnce(ctx, eventID, seats, ttl)
 		if err == nil {
+			span.SetAttributes(
+				attribute.Int("hold.attempts", attempt+1),
+				attribute.String("hold.outcome", "won"),
+			)
+			holds.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "won")))
 			return id, nil
 		}
 		if errors.Is(err, ErrSeatsUnavailable) || !isRetryable(err) {
+			// LOSING A RACE IS NOT AN ERROR. It is the expected outcome for most
+			// callers on a contended seat, so the span is not marked failed and
+			// nothing here is a red trace. Recording it as an error would make a
+			// healthy on-sale look like an outage.
+			outcome := "lost"
+			if !errors.Is(err, ErrSeatsUnavailable) {
+				outcome = "error"
+				span.RecordError(err)
+				span.SetStatus(codes.Error, "hold failed")
+			}
+			span.SetAttributes(
+				attribute.Int("hold.attempts", attempt+1),
+				attribute.String("hold.outcome", outcome),
+			)
+			holds.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", outcome)))
 			return uuid.Nil, err
 		}
 
+		// A retryable failure is a real deadlock or serialization failure. Counted
+		// separately because a rising rate here is the earliest signal that
+		// contention is becoming a problem, well before anyone sees a 409.
+		contention.Add(ctx, 1)
 		lastErr = err
 		// Back off with a little jitter from the attempt number so two victims do
 		// not retry in lockstep and deadlock again.
@@ -82,6 +120,12 @@ func (s *Store) Hold(ctx context.Context, eventID uuid.UUID, seatIDs []uuid.UUID
 		}
 	}
 
+	span.SetAttributes(
+		attribute.Int("hold.attempts", maxRetries),
+		attribute.String("hold.outcome", "exhausted"),
+	)
+	span.SetStatus(codes.Error, "retries exhausted")
+	holds.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "exhausted")))
 	return uuid.Nil, fmt.Errorf("hold failed after %d attempts: %w", maxRetries, lastErr)
 }
 
