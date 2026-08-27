@@ -220,13 +220,20 @@ DELIVERY
                         are packaged. Every service therefore keeps its main package at
                         services/<name>/cmd/.
 
-  THE TAG BUMP MUST RETRY WITH A REBASE. Every matrix job finishes at roughly the same
-  time and each pushes its own bump, so all but one are rejected non-fast-forward.
-  Without a retry the losers fail in the worst possible way: the image IS built and
-  pushed to ghcr, but deploy/ still points at the old tag, so the service is never
-  rolled out. Worse, if the manifest still says :latest it deploys ANYWAY and everything
-  looks healthy - which is exactly what happened to bank on 2026-08-27 while hello
-  succeeded. Each job edits a different file, so the rebase is always a clean merge.
+  NO MATRIX - ONE JOB BUILDS EVERYTHING, and that is a correctness decision rather than
+  a style one. A matrix ran one job per service and every job pushed its own tag-bump
+  commit at the same moment, so all but one were rejected non-fast-forward. That failed
+  in the worst possible way: the image WAS built and pushed to ghcr, but deploy/ still
+  pointed at the old tag, and because the manifest said :latest the service deployed
+  anyway and reported Healthy. bank ran a stale image for half an hour that way on
+  2026-08-27 while hello succeeded.
+
+  A retry with rebase fixed the symptom. One job removes the race entirely - there is
+  only ever one pusher. It also means services are DISCOVERED (anything with a
+  services/<name>/cmd/ directory) rather than listed, so adding a service needs no
+  change to the workflow at all. The cost is serial builds, which for small Go binaries
+  with a warm buildx cache is seconds, and one failure stopping the lot is the behaviour
+  you want anyway.
 
   VERIFY EVERY NEW SERVICE END TO END, because "CI went green" and "the new code is
   running" are different claims:

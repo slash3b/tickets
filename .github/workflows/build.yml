@@ -1,15 +1,17 @@
-# Build changed services, push to GitHub Container Registry, then write the new tag
-# back into deploy/ so Argo CD picks it up.
+# Build every service, push to ghcr, then write the new tags back into deploy/ so
+# Argo CD rolls them out.
 #
-# ghcr rather than Docker Hub: Actions injects GITHUB_TOKEN automatically, so there
-# is no registry credential to create, rotate or leak. It also has no anonymous pull
-# rate limit — Docker Hub throttles per IP, and three cluster nodes behind one NAT
-# address is exactly the shape that trips it, surfacing as ImagePullBackOff with a
-# toomanyrequests error at the worst possible moment.
+# NO MATRIX, deliberately. A matrix ran one job per service, and every job pushed
+# its own tag-bump commit at the same moment — so all but one were rejected
+# non-fast-forward. That failed in the worst possible way: the image was built and
+# pushed, but deploy/ still pointed at the old tag, and because the manifest said
+# :latest the service deployed anyway and reported Healthy. bank silently ran a
+# stale image for half an hour that way on 2026-08-27.
 #
-# The tag bump is a real commit rather than Argo CD Image Updater, deliberately:
-# every deploy becomes a visible line in git history, and "what is running" is
-# answerable by reading the repo instead of querying the cluster.
+# One job means one push, so the race cannot happen at all. It also means services
+# are discovered rather than listed, so adding one needs no change to this file.
+# The cost is serial builds; for small Go binaries with a warm cache that is
+# seconds, and a single failure stopping the lot is the behaviour you want anyway.
 name: build
 
 on:
@@ -20,19 +22,19 @@ on:
       - 'pkg/**'
       - 'go.mod'
       - 'go.sum'
+      - 'Dockerfile'
       - '.github/workflows/build.yml'
   workflow_dispatch:
 
 concurrency:
-  # One build at a time: two concurrent runs would race on the tag-bump commit.
   group: build-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   test:
     runs-on: ubuntu-latest
-    # A real Postgres, so the store tests actually run here instead of skipping.
-    # The oversell test is NOT run in CI - it carries a build tag and is triggered
+    # A real Postgres, so the store tests run here instead of skipping.
+    # The oversell test is NOT run in CI — it carries a build tag and is triggered
     # by hand with `make oversell`. It fires a thousand concurrent goroutines at a
     # database; that belongs in a decision to run it, not in every push.
     services:
@@ -59,15 +61,10 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     permissions:
-      contents: write        # needed to push the tag-bump commit
-      packages: write        # needed to push to ghcr.io
-    strategy:
-      matrix:
-        # One entry per service. Adding a service means adding a line here.
-        service: [hello, bank]
+      contents: write   # to push the tag-bump commit
+      packages: write   # to push to ghcr.io
     steps:
       - uses: actions/checkout@v4
-
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
@@ -76,52 +73,55 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}   # built in; nothing to configure
 
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile
-          push: true
-          build-args: |
-            SERVICE=${{ matrix.service }}
-            VERSION=${{ github.sha }}
-          tags: |
-            ghcr.io/slash3b/tickets-${{ matrix.service }}:${{ github.sha }}
-            ghcr.io/slash3b/tickets-${{ matrix.service }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Bump the deployed tag
+      - name: Install kustomize
         run: |
-          cd deploy/apps/${{ matrix.service }}
-          curl -sSLo /tmp/kustomize.tar.gz \
+          curl -sSLo /tmp/k.tar.gz \
             https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz
-          tar -xzf /tmp/kustomize.tar.gz -C /tmp
-          /tmp/kustomize edit set image \
-            ghcr.io/slash3b/tickets-${{ matrix.service }}=ghcr.io/slash3b/tickets-${{ matrix.service }}:${{ github.sha }}
+          tar -xzf /tmp/k.tar.gz -C /usr/local/bin
 
-      - name: Commit the bump
+      - name: Build, push and pin every service
         run: |
+          set -euo pipefail
+          SHA=${{ github.sha }}
+
+          # Services are whatever has a main package. Adding one needs no edit here.
+          for dir in services/*/cmd; do
+            svc=$(basename "$(dirname "$dir")")
+            image=ghcr.io/${{ github.repository_owner }}/tickets-$svc
+
+            echo "::group::$svc"
+            docker buildx build \
+              --build-arg SERVICE="$svc" \
+              --build-arg VERSION="$SHA" \
+              --tag "$image:$SHA" \
+              --tag "$image:latest" \
+              --cache-from type=gha,scope=$svc \
+              --cache-to   type=gha,scope=$svc,mode=max \
+              --push .
+
+            # Pin the tag in the manifest, if this service is deployed at all.
+            if [ -f "deploy/apps/$svc/kustomization.yaml" ]; then
+              (cd "deploy/apps/$svc" && kustomize edit set image "$image:$SHA")
+              echo "pinned $svc -> $SHA"
+            else
+              echo "$svc has no deploy/apps entry; image pushed, nothing to pin"
+            fi
+            echo "::endgroup::"
+          done
+
+      - name: Commit the pins
+        run: |
+          set -euo pipefail
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add deploy/
-          # No change means the image tag was already current — not a failure.
-          git diff --staged --quiet && echo "no tag change" && exit 0
-          git commit -m "deploy(${{ matrix.service }}): ${{ github.sha }} [skip ci]"
-
-          # RETRY WITH REBASE. Every service in the matrix finishes at roughly the
-          # same time and each pushes its own tag bump, so all but one are rejected
-          # non-fast-forward. Without this the losers fail silently-ish: the image
-          # is built and pushed, but deploy/ still points at the old tag and the
-          # service is simply never rolled out. That is exactly what happened to
-          # bank on 2026-08-27 while hello succeeded.
-          #
-          # Each job edits a different file, so the rebase is always a clean merge.
-          for attempt in 1 2 3 4 5; do
-            if git push; then exit 0; fi
-            echo "push rejected (attempt $attempt) — rebasing onto origin/main"
-            git pull --rebase origin main || exit 1
-            sleep $((RANDOM % 4 + 1))
-          done
-          echo "could not push the tag bump after 5 attempts" >&2
-          exit 1
+          if git diff --staged --quiet; then
+            echo "tags already current"
+            exit 0
+          fi
+          git commit -m "deploy: $SHA [skip ci]" -m "$(git diff --staged --name-only)"
+          # One job means one pusher, so a rejection here can only come from a
+          # human pushing at the same moment. Rebase once and try again.
+          git push || { git pull --rebase origin main && git push; }
+        env:
+          SHA: ${{ github.sha }}
