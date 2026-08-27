@@ -22,7 +22,14 @@ CREATE TABLE IF NOT EXISTS inventory.holds (
     expires_at    timestamptz NOT NULL,             -- short TTL, only meaningful while active
     hard_deadline timestamptz NOT NULL,             -- backstop, applies while converting
     created_at    timestamptz NOT NULL DEFAULT now(),
-    updated_at    timestamptz NOT NULL DEFAULT now()
+    updated_at    timestamptz NOT NULL DEFAULT now(),
+
+    -- WHY a hold ended. Durable, because "who held this seat when it was lost"
+    -- and "did this hold die of a slow bank or an abandoned checkout" are
+    -- different questions with different consequences, and the difference is
+    -- invisible once the row just says 'released'.
+    released_reason text CHECK (released_reason IN
+        ('expired','hard_deadline','cancelled','consumed'))
 );
 
 CREATE INDEX IF NOT EXISTS holds_sweep_idx

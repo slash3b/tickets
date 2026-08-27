@@ -134,6 +134,26 @@ func (s *Store) holdOnce(ctx context.Context, eventID uuid.UUID, seats []uuid.UU
 	return holdID, nil
 }
 
+// Convert moves a hold from `active` to `converting`, which STOPS THE SHORT TTL.
+//
+// Called when payment goes in flight. From here the expiry sweeper will not touch
+// the hold; only the hard deadline can release it. This is the single most
+// important state transition in the system — without it a slow bank expires the
+// hold, the seats go back to the pool, someone else buys them, and the payment
+// then succeeds against seats that are gone.
+func (s *Store) Convert(ctx context.Context, holdID uuid.UUID) error {
+	tag, err := s.db.Exec(ctx,
+		`UPDATE inventory.holds SET state = 'converting', updated_at = now()
+		  WHERE id = $1 AND state = 'active'`, holdID)
+	if err != nil {
+		return fmt.Errorf("convert hold: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("hold %s is not active", holdID)
+	}
+	return nil
+}
+
 // Release returns a hold's seats to the pool. Safe to call twice.
 func (s *Store) Release(ctx context.Context, holdID uuid.UUID, reason string) error {
 	tx, err := s.db.Begin(ctx)

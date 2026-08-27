@@ -763,8 +763,13 @@ MILESTONES
      three-seat groups hold too.
      THE OVERSELL TEST IS MANUAL - build tag `oversell`, so `go test ./...` does
      not compile it and it cannot run by accident. `make oversell` runs it.
-     REMAINING: the expiry sweeper and the hard-deadline sweeper, both singletons.
-     Still no HTTP, no k8s, no other service - the core is proven first.
+     SWEEPERS DONE 2026-08-27: expiry sweeper, hard-deadline sweeper, Convert, and
+     a durable released_reason so "died of a slow bank" and "died of an abandoned
+     checkout" stay distinguishable. The test that matters most passes - a hold in
+     `converting` SURVIVES its short TTL, so a slow bank cannot cost a customer
+     money for seats already sold to someone else.
+     MILESTONE 1 COMPLETE. Still no HTTP, no k8s, no other service - the core was
+     proven first, which was the entire point of doing it this way round.
   2  bank + payments. Idempotency under the timeout-but-succeeded case.
   3  orders. The saga, crash recovery, the paid-to-confirmed gap.
   4  catalog + gateway. First real HTTP API.
