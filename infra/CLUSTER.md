@@ -280,6 +280,20 @@ GITOPS - APP OF APPS, LIVE SINCE 2026-08-24
   values would have to be inlined into the Application, which puts configuration
   somewhere nobody thinks to look.
 
+  IMAGE TAGS ARE PINNED BY CI, AND FOR A WHILE FOUR OF THEM WERE NOT. The build
+  workflow rewrites newTag in the kustomization after pushing an image, which is
+  what gives Argo a manifest change to act on. It used to look for a kustomization
+  at deploy/apps/<service>/, which only exists when a service happens to have one
+  named after it - bank and hello do. gateway, workers, simulator and seeder are
+  all declared inside deploy/apps/tickets/, so they matched nothing and were
+  skipped in silence. They sat at `newTag: latest` from the day they were written.
+
+  THE SYMPTOM IS INVISIBLE, WHICH IS WHY IT LASTED. Argo saw no manifest change,
+  so it never rolled anything out, and the app stayed Synced and Healthy while the
+  pods ran whatever :latest happened to be when they last started. Fixed
+  2026-08-27: the workflow now greps for the image name and pins it wherever it is
+  declared. If a service ever shows `newTag: latest` again, it is not deploying.
+
   HELM WAS DELIBERATELY UNINSTALLED for anything Argo owns. MetalLB and ingress-nginx
   were first installed by helm in 0.3, then `helm uninstall`ed and rebuilt by Argo, so
   there is exactly one owner per resource. `helm list -A` should show ONLY cert-manager.
@@ -697,8 +711,11 @@ ACCESS LAYER - GATEWAY API, MIGRATED 2026-08-27
 
   DNS - THERE IS NONE. The router serves 1.1.1.1 and the pihole that would have
   done local resolution was deleted. Every machine that wants a cluster hostname
-  needs /etc/hosts:
-    192.168.1.240  argocd.tickets.lan hello.tickets.lan signoz.tickets.lan
+  needs /etc/hosts. All of them, in one line:
+
+    192.168.1.240  app.tickets.lan api.tickets.lan argocd.tickets.lan bank.tickets.lan hello.tickets.lan signoz.tickets.lan sim.tickets.lan
+
+  app.tickets.lan is the seat map - the one a person actually opens.
 
 
 THE APPLICATION - DEPLOYED 2026-08-27
@@ -709,6 +726,22 @@ THE APPLICATION - DEPLOYED 2026-08-27
     workers     every singleton         replicas 1, strategy Recreate
     simulator   the load                https://sim.tickets.lan  (/stats, /config)
     seeder      CronJob 03:00 daily     one showing, idempotent
+    web         the seat map, React     https://app.tickets.lan
+
+  THE SEAT MAP IS SERVED AS STATIC FILES AND NOTHING ELSE. nginx holds the built
+  bundle; it does not proxy. The HTTPRoute for app.tickets.lan has two rules -
+  /api goes to the gateway Service, / goes to the bundle - so the browser sees one
+  origin and there is no CORS anywhere. Gateway API picks rules by specificity, so
+  the longer /api prefix wins over /.
+
+  Do not put a proxy_pass back into that nginx. nginx resolves a literal upstream
+  hostname once, when it reads the config, so the web pod would then crash-loop
+  any time the gateway Service was missing and would hold a dead ClusterIP if the
+  Service were recreated. Routing at the Gateway has neither problem.
+
+  api.tickets.lan still exists and still points at the gateway directly. That is
+  what curl and the simulator use, and it means debugging the API never depends on
+  the frontend being deployed.
   ns bank, Argo app `bank`
     bank        the adversarial fake    https://bank.tickets.lan  (PUT /config)
 

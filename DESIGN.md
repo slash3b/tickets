@@ -898,7 +898,32 @@ MILESTONES
      deciding to give it work.
 
      Kafka and its retention were done earlier, in phase 0.7.
-  7  web. The live seat map.
+  7  web. The live seat map.                                    DONE 2026-08-27
+     A small React app at https://app.tickets.lan showing the day's showing: click
+     free seats, hold them, watch the five-minute clock, buy. Verified live through
+     that hostname - hold, a 409 on the same seat, buy, seats turn sold, release
+     puts one back.
+
+     IT POLLS EVERY TWO SECONDS AND IS ALLOWED TO BE STALE. There is no WebSocket
+     on the gateway, and a seat that looks free and comes back 409 is the system
+     working correctly, not a bug - so the app treats it as a normal outcome and
+     shows a refreshed map, never an error page. This is the one place where the
+     UI has to agree with the design instead of fighting it.
+
+     SAME ORIGIN, WITHOUT A PROXY IN THE POD. This answers the open question below
+     about where the build gets served from, and the answer is neither option that
+     was written down. It is an nginx container serving static files only, and the
+     HTTPRoute for app.tickets.lan carries TWO RULES - /api to the gateway Service,
+     / to the bundle. Gateway API orders rules by specificity, so the longer prefix
+     wins. Proxying /api from inside the web pod also worked, and was thrown away:
+     it put an L7 router inside a pod already sitting behind one, and nginx resolves
+     a literal proxy_pass hostname ONCE at startup, so that pod would refuse to
+     start whenever the gateway Service was absent and would keep a dead ClusterIP
+     if it were recreated.
+
+     app.tickets.lan and not the bare tickets.lan: the Gateway listener and the
+     cert cert-manager issues from it are both *.tickets.lan, and a wildcard does
+     not match the apex.
   8  arenas and concerts. Second venue kind, sections, a 20,000-seat chart, on_sale_at
      in the future for the first time.
   9  on-sale mode. The Lady Gaga test. Break it, fix it, write down what broke, and only
@@ -927,7 +952,8 @@ OPEN QUESTIONS
   - Postgres connection pooling: pgbouncer, or is Go's pool enough at this scale?
   - Do orders and payments stay separate services, or is that a split made for the sake
     of having services? Revisit after milestone 3 and be willing to merge them.
-  - Where does the React build get served from - nginx sidecar, or embedded in gateway?
+  - ANSWERED at milestone 7: neither. A static nginx container, with /api routed to
+    the gateway by the HTTPRoute rather than proxied inside the pod.
   - The hot partition, and there is no obviously right answer: key inventory topics by
     (event_id, section_id) and accept that cross-section ordering is lost, put hot events
     on a dedicated topic, or make the seat-map consumers commutative so ordering stops
