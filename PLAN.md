@@ -241,17 +241,40 @@ ON THE CURRENT 21Gi IT WOULD NOT FIT. ClickHouse alone wants 6Gi and Kafka plus 
 another 8Gi; that is two thirds of the present cluster before a single service runs.
 This is why 0.0 comes before 0.3.
 
-RETENTION. With 400G of disk instead of 45G, retention stops being a survival tactic and
-becomes a real choice. Targets, all generous by homelab standards and all still bounded,
-because "unbounded" is how you end up back where this project started:
+RETENTION. SigNoz ships with working TTLs already - this was verified on 2026-08-27,
+not assumed:
 
-    metrics    90 days     the cheapest signal per byte, and the one you want history for
-    logs       30 days
-    traces     7 days      highest volume, shortest useful life
-    Kafka      7 days      long enough to replay a topic and rebuild a read model
+    logs       15 days    signoz_logs.logs_v2, via a _retention_days column (default 15)
+    traces     15 days    signoz_traces.signoz_index_v3, toIntervalSecond(1296000)
+    metrics    30 days    signoz_metrics.samples_v4, toIntervalSecond(2592000)
 
-Every one of these is set at install time. ClickHouse TTLs and Kafka retention are
-configured with the first install, never bolted on after the first disk alert.
+  All three set ttl_only_drop_parts = 1, which is the efficient form: expiry drops whole
+  parts instead of rewriting them, so it costs almost no CPU.
+
+  THE LESSON FROM THE 5 GiB SCARE: that was never a retention failure. Retention was
+  working the whole time. The problem was INPUT - a feedback loop pushing 20,000
+  records/minute, and 15 days of that is roughly 100 GiB. No TTL saves you from an
+  unbounded producer; it only bounds how long the damage is kept. Fix the producer
+  first, then tune retention.
+
+  FOR THE BUILD PHASE these defaults are longer than useful - fifteen days of telemetry
+  from a system that is still being assembled is noise nobody will read. Suggested while
+  building, to be raised once the system is worth observing historically:
+
+    logs        7 days
+    traces      3 days     highest volume, shortest useful life
+    metrics    30 days     keep - cheapest per byte and the only signal worth trends
+
+  HOW TO CHANGE IT: SigNoz UI, Settings -> Retention (it writes the ClickHouse TTLs and
+  persists them). Do NOT ALTER the tables by hand - SigNoz stores the setting separately
+  and would overwrite a manual change on its next reconcile.
+
+  Kafka retention (7 days, long enough to replay a topic and rebuild a read model) is
+  set at install in 0.7, not bolted on after the first disk alert.
+
+  WORTH ADDING: now that SigNoz exists, an alert on ClickHouse PVC usage is the cheapest
+  possible insurance against a repeat. The failure mode is always a producer nobody is
+  watching.
 
 
 PART 3 - PHASING
