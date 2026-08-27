@@ -77,11 +77,14 @@ ACCESS LAYER - because NodePort does not scale to eight services
                         DaemonSet. Needs a spare LAN range reserved outside DHCP.
                         Cost: ~200Mi total.
 
-  ingress-nginx         One entry point, host-based routing, TLS termination. Turns
+  Envoy Gateway         One entry point, host-based routing, TLS termination. Turns
                         eight NodePorts into one LoadBalancer IP and eight hostnames.
-                        Install: helm, ingress-nginx/ingress-nginx. Service type
-                        LoadBalancer, which is what MetalLB is there to satisfy.
-                        Cost: ~256Mi.
+                        GATEWAY API, NOT INGRESS: ingress-nginx was retired by the
+                        Kubernetes project in March 2026, and the Ingress API itself
+                        is feature-frozen. Routes are HTTPRoute objects living beside
+                        the service they route to.
+                        Install: helm, oci://docker.io/envoyproxy/gateway-helm.
+                        Cost: ~256Mi controller + ~256Mi per Gateway proxy.
 
   cert-manager          ALREADY INSTALLED, currently inert. Gets a self-signed
                         ClusterIssuer plus an internal CA so every ingress host gets a
@@ -306,7 +309,10 @@ delivers code from git commit to running pod with no human step.
   0.2b clean slate                                               DONE 2026-08-24
        All observability leftovers deleted - 2 PVCs, 13 orphan CRDs, 4 empty namespaces,
        3 unused helm repos, stale images on every node. See CLEANUP in CLUSTER.md.
-  0.3  MetalLB + ingress-nginx + cert-manager ClusterIssuer.   DONE 2026-08-24
+  0.3  MetalLB + ingress + cert-manager ClusterIssuer.          DONE 2026-08-24
+       SUPERSEDED 2026-08-27: ingress-nginx was retired by Kubernetes in March
+       2026, so the cluster moved to Envoy Gateway and the Gateway API. See
+       ACCESS LAYER in CLUSTER.md.
        Verified: https://argocd.tickets.lan returns 200 with a certificate that
        validates against the internal CA. See ACCESS LAYER in CLUSTER.md.
 

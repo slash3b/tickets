@@ -549,59 +549,94 @@ OBSERVABILITY - SIGNOZ, INSTALLED 2026-08-24
   normalizers Argo applies first. That mistake cost an hour here.
 
 
-ACCESS LAYER - INSTALLED 2026-08-24
------------------------------------
+ACCESS LAYER - GATEWAY API, MIGRATED 2026-08-27
+------------------------------------------------
 
-  Before this the cluster had no Ingress controller and no LoadBalancer; everything
-  externally reachable was a NodePort on a random 30000-32767 port. That does not scale
-  past a couple of services.
+  WHY THIS CHANGED. ingress-nginx was RETIRED by the Kubernetes project in March
+  2026 - no further releases, no security fixes, ever.
+    kubernetes.io/blog/2025/11/11/ingress-nginx-retirement
+    kubernetes.io/blog/2026/01/29/ingress-nginx-steering-committee-statement
+  This cluster ran v1.15.1, the final release, unpatched. It was replaced the same
+  day the retirement was noticed.
 
-  MetalLB v0.16.1          ns metallb-system      helm, chart metallb/metallb
-                           Hands out real LoadBalancer IPs on the LAN in L2 mode.
-                           IPAddressPool lan-pool  192.168.1.240-192.168.1.249
+  A TRAP WORTH NAMING: the Helm repo still serves ingress-nginx charts and the
+  chart metadata carries no deprecated:true flag. Neither means anything. A Helm
+  repo keeps serving artifacts after a project dies, and the deprecation flag only
+  appears if a maintainer sets it. Do not infer a project's health from its
+  registry.
+
+  Ingress was also the wrong API to stay on regardless: it is feature-frozen, which
+  is why every non-trivial behaviour in ingress-nginx was an annotation rather than
+  a field. Gateway API is the successor.
+
+  Envoy Gateway v1.5.4      ns envoy-gateway-system      Argo app, wave 2
+                            Bundles the upstream Gateway API CRDs.
+  GatewayClass envoy        parametersRef -> EnvoyProxy tickets-proxy
+  Gateway tickets           ns envoy-gateway-system, LISTENS ON 192.168.1.240
+                            One wildcard cert for *.tickets.lan covers every host,
+                            so adding a service no longer involves a certificate.
+                            allowedRoutes.namespaces.from: All, so each HTTPRoute
+                            lives beside the service it routes to.
+  HTTPRoutes                argocd/argocd, hello/hello, signoz/signoz
+
+  THE FAILURE THAT COST THE MOST TIME. Envoy Gateway defaults its Service to
+  externalTrafficPolicy: Local. MetalLB then only announces the address from a node
+  holding a ready endpoint - and the envoy pod landed on the CONTROL PLANE, whose
+  speaker announces nothing on this cluster (the working address has always been
+  announced by node-2). The result was silent in every direction: MetalLB allocated
+  the IP, the Service showed an EXTERNAL-IP, the Gateway reported Programmed, the
+  endpoints existed, and the address was simply dead on the LAN. No error anywhere.
+    DIAGNOSTIC: kubectl get servicel2status -A
+    If a LoadBalancer service has no ServiceL2Status, nothing is announcing it.
+  Fixed by setting externalTrafficPolicy: Cluster on the EnvoyProxy, matching what
+  the old ingress Service used. Client IPs still reach backends via X-Forwarded-For.
+
+  ARGO CD NEEDED server.insecure=true, set in cm/argocd-cmd-params-cm. It was
+  answering :80 with a 307 redirect to HTTPS. Gateway API has no equivalent of
+  nginx's backend-protocol annotation - upstream TLS is a BackendTLSPolicy needing
+  argocd's self-signed CA wired in - and terminating TLS at the Gateway is the
+  conventional answer. NOTE this also means the argocd NodePort on :32640 no longer
+  serves TLS; use http://192.168.1.116:31439 or the hostname.
+
+  CERT-MANAGER needed config.enableGatewayAPI=true (helm revision 9) to issue certs
+  for Gateway listeners instead of Ingress. The ExperimentalGatewayAPISupport
+  feature gate is already beta-default-on in v1.19.1, so only the config key was
+  needed. It will CRASH on startup if that key is set before the Gateway API CRDs
+  exist - install Envoy Gateway first.
+
+  PERMANENT OutOfSync, avoided rather than ignored. Gateway API defaults a lot
+  server-side: parentRefs group/kind, backendRefs group/kind/weight,
+  certificateRefs group, and rules[].matches (a PathPrefix / match). Omit them and
+  Argo diffs forever. These manifests write every default out EXPLICITLY, which
+  costs the same lines as an ignoreDifferences rule and documents what each route
+  attaches to.
+
+  MetalLB v0.16.1          ns metallb-system      Argo app, wave 0
+                           IPAddressPool lan-pool 192.168.1.240-192.168.1.249
                            L2Advertisement lan
-                           Note 0.16.x installs frr-k8s alongside the speakers - that is
-                           the current default, not something we asked for.
-
-    THE POOL IS OUTSIDE THE ROUTER'S DHCP RANGE (.20-.239 on the TP-Link Archer AX50),
-    which is the entire requirement. Do NOT add these addresses to the router's Address
-    Reservation: that binds a MAC to an IP, and in L2 mode the node answering ARP for a
-    service IP - and therefore the MAC - changes on failover.
+                           Pool is OUTSIDE the router's DHCP range (.20-.239), the
+                           entire requirement. Do NOT use the router's Address
+                           Reservation for it: in L2 mode the node answering ARP,
+                           and so the MAC, changes on failover.
+                           Use metallb.io/loadBalancerIPs to pin an address; the
+                           metallb.universe.tf form still works but logs a
+                           deprecation warning on every reconcile.
 
     PING DOES NOT WORK against a MetalLB L2 address and that is normal. The speaker
-    answers ARP but the IP is not bound to any interface, so nothing replies to ICMP.
-    Test with curl, not ping. This will waste ten minutes of someone's life otherwise.
+    answers ARP but nothing is bound to an interface, so ICMP gets no reply. Test
+    with curl. This will waste ten minutes of someone's life otherwise.
 
-  ingress-nginx 4.15.1     ns ingress-nginx       helm, chart ingress-nginx/ingress-nginx
-                           Single entry point, host-based routing, TLS termination.
-                           Service LoadBalancer, PINNED to 192.168.1.240 via annotation
-                           metallb.universe.tf/loadBalancerIPs - the address ends up in
-                           /etc/hosts everywhere, so it must not move.
-                           IngressClass nginx, marked default.
-                           1 replica. Raise to 2 once anything depends on it surviving a
-                           node reboot.
+  cert-manager v1.19.1     ClusterIssuer selfsigned-bootstrap  used once
+                           Certificate cert-manager/tickets-lan-ca  ECDSA, 10 years
+                           ClusterIssuer tickets-lan-ca        signs everything
+                           Extract the CA to trust it locally:
+                             kubectl -n cert-manager get secret tickets-lan-ca \
+                               -o jsonpath='{.data.ca\.crt}' | base64 -d > ca.crt
 
-  cert-manager             FINALLY HAS A JOB. It had been running with zero Issuers and
-                           zero Certificates since 2025.
-                           ClusterIssuer selfsigned-bootstrap   used exactly once
-                           Certificate cert-manager/tickets-lan-ca   the internal root,
-                             ECDSA P-256, 10 year duration
-                           ClusterIssuer tickets-lan-ca         signs everything else
-
-    Any Ingress gets a certificate by adding
-      cert-manager.io/cluster-issuer: tickets-lan-ca
-    and a tls: block. There is no public DNS and no Let's Encrypt here, so an internal
-    CA is the only option.
-
-    Browsers will warn until the CA is imported into a trust store. Extract it with:
-      kubectl -n cert-manager get secret tickets-lan-ca \
-        -o jsonpath='{.data.ca\.crt}' | base64 -d > tickets-lan-ca.crt
-
-  DNS - THERE IS NONE. The router serves 1.1.1.1 and the pihole LXC that would have done
-  local resolution was deleted 2026-08-24. Every machine that wants to reach a cluster
-  hostname needs an /etc/hosts entry pointing at 192.168.1.240:
-    192.168.1.240  argocd.tickets.lan signoz.tickets.lan
-  Revisit with CoreDNS behind MetalLB, or a rebuilt pihole, if that list gets annoying.
+  DNS - THERE IS NONE. The router serves 1.1.1.1 and the pihole that would have
+  done local resolution was deleted. Every machine that wants a cluster hostname
+  needs /etc/hosts:
+    192.168.1.240  argocd.tickets.lan hello.tickets.lan signoz.tickets.lan
 
 
 VIRTUALIZATION - PROXMOX
