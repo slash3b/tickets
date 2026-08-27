@@ -1,0 +1,231 @@
+package store
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+// PaymentOutcome is what orders needs to know about a charge. Three values, not
+// two — see payments: `unknown` is not a variant of `failed`.
+type PaymentOutcome string
+
+const (
+	PaymentSucceeded PaymentOutcome = "succeeded"
+	PaymentFailed    PaymentOutcome = "failed"
+	PaymentUnknown   PaymentOutcome = "unknown"
+)
+
+// ErrHoldGone means the seats were released before the commit landed. If money
+// has moved, this is the refund path.
+var ErrHoldGone = errors.New("hold released before commit")
+
+// Inventory and Payments are declared HERE, by the consumer, rather than exported
+// from those packages. Orders states exactly what it needs; the implementations
+// adapt. Today they are direct calls in one binary, tomorrow gRPC, and the saga
+// does not change either way.
+type Inventory interface {
+	Convert(ctx context.Context, holdID uuid.UUID) error
+	Commit(ctx context.Context, holdID uuid.UUID) error
+	Release(ctx context.Context, holdID uuid.UUID, reason string) error
+}
+
+type Payments interface {
+	// Charge must be idempotent per order — calling it twice charges once.
+	Charge(ctx context.Context, orderID uuid.UUID, amountMinor int64) (PaymentOutcome, string, error)
+}
+
+// Saga drives one purchase: convert the hold, charge, commit the seats.
+//
+// Every step is written to the log BEFORE it is attempted, so a process that dies
+// mid-saga leaves evidence of what may have happened rather than a silent gap.
+type Saga struct {
+	store *Store
+	inv   Inventory
+	pay   Payments
+}
+
+func NewSaga(s *Store, inv Inventory, pay Payments) *Saga {
+	return &Saga{store: s, inv: inv, pay: pay}
+}
+
+// Run advances an order as far as it can. It is safe to call repeatedly on the
+// same order — that is precisely what the resumer does after a crash.
+func (sg *Saga) Run(ctx context.Context, orderID uuid.UUID) error {
+	o, err := sg.store.Get(ctx, orderID)
+	if err != nil {
+		return err
+	}
+	if o == nil {
+		return fmt.Errorf("order %s not found", orderID)
+	}
+
+	for {
+		before := o.State
+
+		switch o.State {
+		case StateCreated:
+			err = sg.convert(ctx, o)
+		case StateAwaitingPayment:
+			err = sg.charge(ctx, o)
+		case StatePaid:
+			err = sg.commit(ctx, o)
+		default:
+			return nil // terminal, or waiting on something outside the saga
+		}
+		if err != nil {
+			return err
+		}
+
+		if o, err = sg.store.Get(ctx, orderID); err != nil {
+			return err
+		}
+		if o.State == before {
+			// No progress possible right now — an unknown payment, say. Leave it
+			// for the resumer rather than spinning.
+			return nil
+		}
+	}
+}
+
+// convert stops the hold's short TTL before any money moves. Doing this first is
+// what stops a slow bank costing a customer their seats.
+func (sg *Saga) convert(ctx context.Context, o *Order) error {
+	if err := sg.store.LogAttempt(ctx, o.ID, "convert_hold"); err != nil {
+		return err
+	}
+	if err := sg.inv.Convert(ctx, o.HoldID); err != nil {
+		// The hold is gone or was never active. Nothing has been charged, so
+		// failing here is clean.
+		return sg.store.Advance(ctx, o.ID, StateFailed, "convert_hold", err.Error())
+	}
+	return sg.store.Advance(ctx, o.ID, StateAwaitingPayment, "convert_hold", "")
+}
+
+func (sg *Saga) charge(ctx context.Context, o *Order) error {
+	if err := sg.store.LogAttempt(ctx, o.ID, "charge"); err != nil {
+		return err
+	}
+
+	outcome, declineCode, err := sg.pay.Charge(ctx, o.ID, o.AmountMinor)
+	if err != nil {
+		return fmt.Errorf("charge: %w", err)
+	}
+
+	switch outcome {
+	case PaymentSucceeded:
+		return sg.store.Advance(ctx, o.ID, StatePaid, "charge", "")
+	case PaymentFailed:
+		// A definite decline. Release the seats — nobody was charged.
+		if rErr := sg.inv.Release(ctx, o.HoldID, "payment_declined"); rErr != nil {
+			return rErr
+		}
+		return sg.store.Advance(ctx, o.ID, StateFailed, "charge", declineCode)
+	default:
+		// UNKNOWN. Do NOT release the seats and do NOT fail the order. The money
+		// may have moved; releasing here is how a paying customer loses their
+		// seats to someone else. The hold is in `converting`, so nobody can take
+		// them while payments reconciles.
+		return nil
+	}
+}
+
+// commit is the last step, and it runs AFTER money has moved.
+//
+// FORWARD RECOVERY, NOT ROLLBACK. If this fails, the correct answer is almost
+// always to try again rather than to refund: the seats are still held in
+// `converting` and nobody else can take them, so the purchase is still
+// completable. Only a hold that has actually been released — which the hard
+// deadline can do — turns this into a refund.
+func (sg *Saga) commit(ctx context.Context, o *Order) error {
+	if err := sg.store.LogAttempt(ctx, o.ID, "commit_seats"); err != nil {
+		return err
+	}
+
+	err := sg.inv.Commit(ctx, o.HoldID)
+	switch {
+	case err == nil:
+		return sg.store.Advance(ctx, o.ID, StateConfirmed, "commit_seats", "")
+	case errors.Is(err, ErrHoldGone):
+		// The one case where the system has taken money it cannot honour.
+		// Meant to be rare enough to alert on.
+		return sg.store.Advance(ctx, o.ID, StateReconciling, "commit_seats",
+			"seats released before commit; refund required")
+	default:
+		// Transient. Leave it in `paid` and let the resumer try again.
+		return fmt.Errorf("commit seats: %w", err)
+	}
+}
+
+// Resumer finds orders stuck mid-saga and drives them forward.
+//
+// This is what makes a crash survivable rather than merely survivable-in-theory.
+// An order left in `paid` by a process that died has money attached and no seats
+// yet; nothing else in the system will notice it.
+//
+// MUST RUN AS A SINGLETON, like the inventory sweepers and the payment
+// reconciler.
+type Resumer struct {
+	saga   *Saga
+	store  *Store
+	minAge time.Duration
+	batch  int
+
+	OnResumed func(orderID uuid.UUID, from State)
+	OnError   func(error)
+}
+
+func NewResumer(saga *Saga, s *Store, minAge time.Duration) *Resumer {
+	return &Resumer{saga: saga, store: s, minAge: minAge, batch: 50}
+}
+
+// Once drives one batch forward and returns how many orders it touched.
+func (r *Resumer) Once(ctx context.Context) (int, error) {
+	stuck, err := r.store.InFlight(ctx, r.minAge, r.batch)
+	if err != nil {
+		return 0, fmt.Errorf("list in-flight: %w", err)
+	}
+
+	n := 0
+	for _, o := range stuck {
+		if o.State == StateReconciling {
+			// Needs a refund, which is a human or a refund worker's job, not the
+			// saga's. Skip rather than spin on it.
+			continue
+		}
+		from := o.State
+		if err := r.saga.Run(ctx, o.ID); err != nil {
+			r.report(fmt.Errorf("resume %s: %w", o.ID, err))
+			continue
+		}
+		if r.OnResumed != nil {
+			r.OnResumed(o.ID, from)
+		}
+		n++
+	}
+	return n, nil
+}
+
+func (r *Resumer) Run(ctx context.Context, every time.Duration) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		if _, err := r.Once(ctx); err != nil {
+			r.report(err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+func (r *Resumer) report(err error) {
+	if r.OnError != nil {
+		r.OnError(err)
+	}
+}

@@ -798,7 +798,32 @@ MILESTONES
      the most expensive mistake available here.
      MILESTONE 2 COMPLETE apart from webhooks, which wait for orders to exist -
      there is nothing to notify yet.
-  3  orders. The saga, crash recovery, the paid-to-confirmed gap.
+  3  orders.                                                   DONE 2026-08-27
+     The saga (convert hold -> charge -> commit seats), the saga log, and the
+     resumer. Eight tests, and the log itself proves the ordering the design
+     depends on:
+       convert_hold:attempting convert_hold:ok charge:attempting charge:ok
+       commit_seats:attempting commit_seats:ok
+     The hold is converted BEFORE any money moves, and every step is written to
+     the log before it is attempted - so a process that dies mid-saga leaves
+     evidence of what MAY have happened rather than a silent gap.
+
+     THE PAID-TO-CONFIRMED GAP IS CROSSED FORWARD. A crashed order sitting in
+     `paid` is resumed by committing the seats, never by refunding: the seats are
+     still held in `converting` so nobody else can have taken them, and the
+     purchase is still completable. Verified - the resumer confirms it without
+     charging again and without releasing anything.
+
+     Only a hold that was actually released, which the hard deadline can do,
+     turns this into `reconciling` - the single case where the system holds money
+     it cannot honour. It is visible rather than silent, and carries a reason.
+
+     Also guarded: an UNKNOWN payment must not release the seats. That is how a
+     paying customer loses their seats to someone else.
+
+     Inventory gained Commit, which is idempotent because the resumer retries it
+     after a crash and "did my commit land before I died?" is a question the
+     caller often cannot answer.
   4  catalog + gateway. First real HTTP API.
   5  simulator, steady mode. First continuous load.
   6  containerise everything, deploy via Argo CD to the homelab. Reclaim disk FIRST and

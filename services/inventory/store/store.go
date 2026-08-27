@@ -23,6 +23,12 @@ import (
 // someone two of the three seats they asked for is worse than handing them none.
 var ErrSeatsUnavailable = errors.New("one or more seats are not available")
 
+// ErrHoldReleased means the seats went back to the pool before the commit landed.
+// If money has already moved, this is the refund path — the only case in the
+// whole design where the system takes payment it cannot honour, which is why the
+// hard deadline that produces it is meant to be rare enough to alert on.
+var ErrHoldReleased = errors.New("hold was already released; seats are gone")
+
 // serializationFailure is SQLSTATE 40001; deadlockDetected is 40P01. Postgres
 // raises the latter when two concurrent statements lock the same rows in a
 // different order — which is exactly what two overlapping multi-seat requests do.
@@ -152,6 +158,55 @@ func (s *Store) Convert(ctx context.Context, holdID uuid.UUID) error {
 		return fmt.Errorf("hold %s is not active", holdID)
 	}
 	return nil
+}
+
+// Commit turns a converting hold's seats into sold. Terminal and irreversible
+// for the life of the event.
+//
+// IDEMPOTENT ON PURPOSE. This is the last step of the saga, and it runs after
+// money has already moved — so it will be retried by the resumer after a crash,
+// possibly several times. It must be safe to call on an already-consumed hold,
+// because "did my commit land before I died?" is a question the caller often
+// cannot answer.
+func (s *Store) Commit(ctx context.Context, holdID uuid.UUID) error {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var state string
+	if err := tx.QueryRow(ctx,
+		`SELECT state FROM inventory.holds WHERE id = $1 FOR UPDATE`, holdID).Scan(&state); err != nil {
+		return fmt.Errorf("load hold: %w", err)
+	}
+
+	switch state {
+	case "consumed":
+		return nil // already done; saying so is not an error
+	case "released":
+		// The seats are gone. Money may have moved against them, so this is the
+		// case that needs a refund rather than a retry.
+		return ErrHoldReleased
+	case "active", "converting":
+	default:
+		return fmt.Errorf("hold %s in unexpected state %q", holdID, state)
+	}
+
+	if _, err := tx.Exec(ctx,
+		`UPDATE inventory.event_seats SET status = 'sold', updated_at = now()
+		  WHERE hold_id = $1 AND status = 'held'`, holdID); err != nil {
+		return fmt.Errorf("sell seats: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx,
+		`UPDATE inventory.holds
+		    SET state = 'consumed', released_reason = 'consumed', updated_at = now()
+		  WHERE id = $1`, holdID); err != nil {
+		return fmt.Errorf("consume hold: %w", err)
+	}
+
+	return tx.Commit(ctx)
 }
 
 // Release returns a hold's seats to the pool. Safe to call twice.
