@@ -46,7 +46,7 @@ func (p paymentsAdapter) Charge(ctx context.Context, orderID uuid.UUID, amountMi
 
 // buildSystem wires every service together against one real database and one real
 // (fake) bank, and returns the gateway's HTTP surface.
-func buildSystem(t *testing.T, bankCfg bank.Config) (*httptest.Server, *catalogstore.Store, *inventorystore.Store) {
+func buildSystem(t *testing.T, bankCfg bank.Config) (*httptest.Server, *catalogstore.Store, *inventorystore.Store, *pgxpool.Pool) {
 	t.Helper()
 
 	dsn := os.Getenv("DATABASE_URL")
@@ -103,7 +103,7 @@ func buildSystem(t *testing.T, bankCfg bank.Config) (*httptest.Server, *catalogs
 
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)
-	return srv, cat, inv
+	return srv, cat, inv, pool
 }
 
 // seedShowing creates a cinema, an event on sale now, and opens its seats.
@@ -174,7 +174,7 @@ func post(t *testing.T, srv *httptest.Server, path string, body, into any) int {
 // TestBuyATicketEndToEnd is the first time the whole system does its job:
 // browse, pick seats, hold them, pay, and end up with seats that are sold.
 func TestBuyATicketEndToEnd(t *testing.T) {
-	srv, cat, inv := buildSystem(t, bank.Config{}) // bank behaves
+	srv, cat, inv, _ := buildSystem(t, bank.Config{}) // bank behaves
 	eventID := seedShowing(t, cat, inv)
 
 	// Browse.
@@ -247,7 +247,7 @@ func TestBuyATicketEndToEnd(t *testing.T) {
 // TestLosingTheRaceIs409 — two buyers want the same seat. The loser must get a
 // 409 they can act on, not a 500.
 func TestLosingTheRaceIs409(t *testing.T) {
-	srv, cat, inv := buildSystem(t, bank.Config{})
+	srv, cat, inv, _ := buildSystem(t, bank.Config{})
 	eventID := seedShowing(t, cat, inv)
 
 	var sections struct{ Sections []Section }
@@ -273,7 +273,7 @@ func TestLosingTheRaceIs409(t *testing.T) {
 
 // TestDeclinedPaymentFreesTheSeats — a declined card must not leave seats stuck.
 func TestDeclinedPaymentFreesTheSeats(t *testing.T) {
-	srv, cat, inv := buildSystem(t, bank.Config{DeclineRate: 1.0}) // always decline
+	srv, cat, inv, _ := buildSystem(t, bank.Config{DeclineRate: 1.0}) // always decline
 	eventID := seedShowing(t, cat, inv)
 
 	var sections struct{ Sections []Section }

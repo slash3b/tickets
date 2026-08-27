@@ -849,7 +849,32 @@ MILESTONES
      inventory opens them. Inventory remains the only writer of seat status
      anywhere in the system, including the initial load, where letting catalog do
      it directly would have been the obvious shortcut.
-  5  simulator, steady mode. First continuous load.
+  5  simulator, steady mode.                                   DONE 2026-08-27
+     Virtual buyers as state machines with five profiles, arriving as a POISSON
+     process rather than on a metronome - evenly spaced requests hide exactly the
+     bunching that causes contention.
+
+     IT IS A CLIENT, NOT A PEER. It is constructed with nothing but a base URL:
+     no stores, no database handle, no privileged path. A test asserts that a
+     buyer holding only HTTP can complete a purchase, so if the simulator ever
+     needs an internal API the API is wrong, not the test.
+
+     THE DIVERGENCE CHECK NOW EXISTS, and it is the alarm this file calls the
+     most important in the system after the oversell counter. The simulator counts
+     its own purchases; the backend counts confirmed orders and sold seats. Those
+     come from independent systems and must agree. Verified: 25 sessions, 25
+     bought, 25 confirmed, 25 sold, zero errors.
+
+     Profiles leave seats in deliberately different states, which is the point of
+     having them: the abandoner leaves a hold for the expiry sweeper (nothing else
+     ever exercises it under real conditions), the picky buyer generates hold
+     churn, the group buyer takes three together and creates the overlapping seat
+     sets that make lock ordering matter, and the browser is pure read load - the
+     majority of real traffic.
+
+     DEFAULT IS TWO ARRIVALS PER MINUTE, 55% of them browsers who never buy. A
+     system that is quietly busy is observable and debuggable; one under permanent
+     stress is neither. Load goes up only when someone turns it up.
   6  containerise everything, deploy via Argo CD to the homelab. Reclaim disk FIRST and
      stand up Kafka via Strimzi with retention set correctly from the very first topic -
      a Kafka installed with defaults on this hardware will fill a node before you have
