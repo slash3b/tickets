@@ -108,4 +108,20 @@ jobs:
           # No change means the image tag was already current — not a failure.
           git diff --staged --quiet && echo "no tag change" && exit 0
           git commit -m "deploy(${{ matrix.service }}): ${{ github.sha }} [skip ci]"
-          git push
+
+          # RETRY WITH REBASE. Every service in the matrix finishes at roughly the
+          # same time and each pushes its own tag bump, so all but one are rejected
+          # non-fast-forward. Without this the losers fail silently-ish: the image
+          # is built and pushed, but deploy/ still points at the old tag and the
+          # service is simply never rolled out. That is exactly what happened to
+          # bank on 2026-08-27 while hello succeeded.
+          #
+          # Each job edits a different file, so the rebase is always a clean merge.
+          for attempt in 1 2 3 4 5; do
+            if git push; then exit 0; fi
+            echo "push rejected (attempt $attempt) — rebasing onto origin/main"
+            git pull --rebase origin main || exit 1
+            sleep $((RANDOM % 4 + 1))
+          done
+          echo "could not push the tag bump after 5 attempts" >&2
+          exit 1
