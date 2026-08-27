@@ -1,0 +1,97 @@
+# Cache. NEVER the truth for anything.
+#
+# DESIGN.md sets the test this configuration has to pass: flushing Redis in
+# production must cost latency and nothing else. If losing it can cost
+# correctness, the design is wrong — so this is deliberately configured as
+# something that CAN be lost:
+#
+#   no PersistentVolumeClaim   nothing to bind, so unlike Postgres and ClickHouse
+#                              this pod is not welded to a node and can be
+#                              rescheduled anywhere, any time
+#   --save ""                  no RDB snapshots
+#   --appendonly no            no AOF
+#   maxmemory-policy allkeys-lru
+#                              when full it EVICTS rather than refusing writes or
+#                              being OOM-killed. A cache that returns errors when
+#                              full is just a slow database.
+#
+# It is a plain Deployment with no operator and no chart on purpose. Postgres
+# earned an operator because backup, failover and version upgrades are genuinely
+# hard. None of that applies to something whose recovery plan is "start again".
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: data
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+  labels: {app: redis}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: redis}
+  template:
+    metadata:
+      labels: {app: redis}
+    spec:
+      # Keep it off the control plane like everything else that does real work,
+      # even though without a volume it could live anywhere.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: redis
+          image: redis:8.2-alpine
+          args:
+            - --save
+            - ""
+            - --appendonly
+            - "no"
+            - --maxmemory
+            - 512mb
+            - --maxmemory-policy
+            - allkeys-lru
+          ports:
+            - {name: redis, containerPort: 6379}
+          resources:
+            requests: {cpu: 25m, memory: 128Mi}
+            # Limit sits above maxmemory so Redis evicts on its own terms rather
+            # than being killed by the kernel first.
+            limits:   {memory: 768Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+          livenessProbe:
+            exec: {command: [redis-cli, ping]}
+            periodSeconds: 10
+          readinessProbe:
+            exec: {command: [redis-cli, ping]}
+            periodSeconds: 5
+      volumes:
+        # emptyDir, not a PVC: scratch space that dies with the pod, which is
+        # exactly the intent.
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: data
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  selector: {app: redis}
+  ports:
+    - {name: redis, port: 6379, targetPort: redis}
