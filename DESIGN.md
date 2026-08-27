@@ -875,10 +875,29 @@ MILESTONES
      DEFAULT IS TWO ARRIVALS PER MINUTE, 55% of them browsers who never buy. A
      system that is quietly busy is observable and debuggable; one under permanent
      stress is neither. Load goes up only when someone turns it up.
-  6  containerise everything, deploy via Argo CD to the homelab. Reclaim disk FIRST and
-     stand up Kafka via Strimzi with retention set correctly from the very first topic -
-     a Kafka installed with defaults on this hardware will fill a node before you have
-     finished reading about it.
+  6  containerise everything, deploy via Argo CD.               DONE 2026-08-27
+     Five services deployed and running: gateway, workers, simulator, bank, hello,
+     plus a seeder CronJob. Verified live in the cluster - a showing on the public
+     API at api.tickets.lan, the simulator buying through it, and the DIVERGENCE
+     CHECK AGREEING IN PRODUCTION: simulator bought 1, backend confirmed 1, sold 1.
+
+     SHAPE, stated plainly: catalog, inventory, orders and payments are PACKAGES
+     inside gateway and workers, not separate deployments. Every boundary is
+     already a consumer-declared interface so splitting them is wiring rather than
+     rework, and running two processes until there is a reason to run six avoids
+     paying for network hops that buy nothing yet. This is a deviation from the
+     seven-service picture above, deliberately, and it is written down rather than
+     quietly true.
+
+     workers holds every singleton - both sweepers, the reconciler, the resumer -
+     with replicas 1 and strategy Recreate, so scaling the API cannot scale them
+     and a rolling update cannot briefly run two.
+
+     The seeder CronJob creates ONE SHOWING A DAY at 03:00, idempotently. That is
+     what keeps the system permanently doing something real without anybody
+     deciding to give it work.
+
+     Kafka and its retention were done earlier, in phase 0.7.
   7  web. The live seat map.
   8  arenas and concerts. Second venue kind, sections, a 20,000-seat chart, on_sale_at
      in the future for the first time.

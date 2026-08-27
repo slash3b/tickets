@@ -701,6 +701,49 @@ ACCESS LAYER - GATEWAY API, MIGRATED 2026-08-27
     192.168.1.240  argocd.tickets.lan hello.tickets.lan signoz.tickets.lan
 
 
+THE APPLICATION - DEPLOYED 2026-08-27
+-------------------------------------
+
+  ns tickets, Argo app `tickets`, wave 5.
+    gateway     the public API          https://api.tickets.lan
+    workers     every singleton         replicas 1, strategy Recreate
+    simulator   the load                https://sim.tickets.lan  (/stats, /config)
+    seeder      CronJob 03:00 daily     one showing, idempotent
+  ns bank, Argo app `bank`
+    bank        the adversarial fake    https://bank.tickets.lan  (PUT /config)
+
+  WORKERS MUST STAY AT ONE REPLICA. It runs both inventory sweepers, the payment
+  reconciler and the order resumer. Nothing there is unsafe concurrently, but N
+  replicas do N times the work on the same rows and multiply traffic to the bank.
+  strategy: Recreate is deliberate - a rolling update would briefly run two.
+
+  THE ONE MANUAL STEP: database credentials. CloudNativePG writes secret
+  tickets-pg-app into ns data, and Kubernetes secrets do not cross namespaces, so
+  it has to be copied into ns tickets:
+
+    kubectl -n data get secret tickets-pg-app -o json \
+      | jq '.metadata = {name:"tickets-pg-app", namespace:"tickets"}' \
+      | kubectl apply -f -
+
+  IT WILL GO STALE IF THE PASSWORD IS EVER ROTATED. A secret-replicating operator
+  would fix this properly; until then, rotating the Postgres password means
+  redoing this copy, and the symptom will be gateway and workers failing readiness
+  with an auth error.
+
+  SCHEMAS are applied at startup by whichever of gateway/workers/seeder starts
+  first, under a Postgres advisory lock so concurrent starts cannot collide. See
+  pkg/migrate, which is explicit that it is NOT a migration tool: no versions, no
+  ordering, no ALTER. Replace it before a column ever changes under live data.
+
+  THE HEALTH CHECK THAT MATTERS is not a probe. The simulator counts its own
+  purchases and the backend counts confirmed orders and sold seats; those come
+  from independent systems and must agree:
+    curl -k https://sim.tickets.lan/stats
+    kubectl -n data exec tickets-pg-1 -c postgres -- psql -U postgres -d tickets \
+      -tAc "SELECT count(*) FROM orders.orders WHERE state='confirmed'"
+  Divergence means an oversell or a lost order. Verified equal on 2026-08-27.
+
+
 DATA PLANE - POSTGRES, INSTALLED 2026-08-27
 -------------------------------------------
 
