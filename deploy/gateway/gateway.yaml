@@ -37,7 +37,8 @@ spec:
       tls:
         mode: Terminate
         certificateRefs:
-          - kind: Secret
+          - group: ""          # API default, written out so Argo does not diff on it
+            kind: Secret
             name: tickets-lan-wildcard-tls
       allowedRoutes:
         # Routes live beside the service they route to, in that service's own

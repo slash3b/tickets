@@ -8,6 +8,11 @@
 # network and never leaves the node.
 #
 # That flag is set in cm/argocd-cmd-params-cm — see GITOPS in infra/CLUSTER.md.
+# NOTE: group/kind/weight below are the API's own defaults, written out explicitly.
+# Kubernetes fills them in on write, so leaving them off makes Argo CD diff the
+# manifest against a live object that has them — permanently OutOfSync, which
+# destroys OutOfSync as a signal. Being explicit is cheaper than an ignore rule
+# and documents what the route actually attaches to.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -17,12 +22,17 @@ metadata:
     argocd.argoproj.io/sync-wave: "4"
 spec:
   parentRefs:
-    - name: tickets
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: tickets
       namespace: envoy-gateway-system
       sectionName: https
   hostnames:
     - argocd.tickets.lan
   rules:
     - backendRefs:
-        - name: argocd-server
+        - group: ""
+          kind: Service
+          name: argocd-server
           port: 80
+          weight: 1

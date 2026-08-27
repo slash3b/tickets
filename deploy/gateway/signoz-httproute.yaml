@@ -1,6 +1,11 @@
 # SigNoz UI behind the Gateway. The chart's own ingress is disabled in
 # deploy/platform/signoz/values.yaml; routing lives here instead so every route in
 # the cluster is described the same way.
+# NOTE: group/kind/weight below are the API's own defaults, written out explicitly.
+# Kubernetes fills them in on write, so leaving them off makes Argo CD diff the
+# manifest against a live object that has them — permanently OutOfSync, which
+# destroys OutOfSync as a signal. Being explicit is cheaper than an ignore rule
+# and documents what the route actually attaches to.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -10,12 +15,17 @@ metadata:
     argocd.argoproj.io/sync-wave: "4"
 spec:
   parentRefs:
-    - name: tickets
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: tickets
       namespace: envoy-gateway-system
       sectionName: https
   hostnames:
     - signoz.tickets.lan
   rules:
     - backendRefs:
-        - name: signoz
+        - group: ""
+          kind: Service
+          name: signoz
           port: 8080
+          weight: 1
