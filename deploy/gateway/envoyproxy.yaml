@@ -1,0 +1,38 @@
+# Customises the Service that Envoy Gateway creates for the Gateway.
+#
+# TWO THINGS HERE, both learned the hard way on this cluster.
+#
+# externalTrafficPolicy: Cluster
+#   Envoy Gateway defaults its Service to Local, which preserves client source IPs
+#   but means MetalLB will only announce the address from a node that holds a ready
+#   endpoint. The envoy pod landed on the control plane, and the control-plane
+#   speaker announces nothing here — the working ingress address has always been
+#   announced by node-2. Result: the IP was allocated, the Gateway reported
+#   Programmed, and the address was simply dead on the LAN with no error anywhere.
+#   Cluster lets any node answer for it, which is what the old ingress Service did.
+#   Client IPs are still available to backends via X-Forwarded-For.
+#
+# metallb.io/loadBalancerIPs
+#   The modern annotation. metallb.universe.tf/loadBalancerIPs still works but logs
+#   a deprecation warning on every reconcile.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: tickets-proxy
+  namespace: envoy-gateway-system
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyService:
+        externalTrafficPolicy: Cluster
+        annotations:
+          metallb.io/loadBalancerIPs: "192.168.1.241"
+      envoyDeployment:
+        replicas: 1
+        container:
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits:   {memory: 384Mi}
