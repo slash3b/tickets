@@ -1,0 +1,115 @@
+# The seat map a human actually looks at.
+#
+# Static files only — nginx serves the built bundle and nothing else. The browser
+# calls /api on this same hostname, and the HTTPRoute at the bottom sends that
+# prefix to the gateway Service instead. Same origin, so no CORS, and no proxy
+# inside this pod duplicating what the Gateway already does.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: tickets
+  labels: {app: web}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: web}
+  template:
+    metadata:
+      labels: {app: web}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        # nginx in the official image, not 65534 — the config, cache dirs and pid
+        # file are chowned to this uid at build time.
+        runAsUser: 101
+        runAsGroup: 101
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: web
+          image: ghcr.io/slash3b/tickets-web:latest   # CI rewrites this
+          ports:
+            - {name: http, containerPort: 8080}
+          resources:
+            # Serving a 200KB bundle to a handful of browsers. This is the
+            # cheapest thing in the cluster and should look like it.
+            requests: {cpu: 5m, memory: 16Mi}
+            limits:   {memory: 64Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            # NOT readOnlyRootFilesystem: nginx writes its pid file and temp dirs
+            # at runtime. The writable paths below are the only ones it needs, so
+            # the root filesystem stays read-only in effect without the flag
+            # breaking startup.
+          volumeMounts:
+            - {name: run,   mountPath: /var/run}
+            - {name: cache, mountPath: /var/cache/nginx}
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 5
+      volumes:
+        - {name: run,   emptyDir: {}}
+        - {name: cache, emptyDir: {}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: tickets
+spec:
+  selector: {app: web}
+  ports:
+    - {name: http, port: 80, targetPort: http}
+---
+# ONE HOSTNAME, TWO BACKENDS. This is what makes the API same-origin.
+#
+# Gateway API orders rules by match specificity, not by the order they appear in:
+# the longer PathPrefix /api wins over / for any request under /api, and everything
+# else falls through to the static bundle. Both Services are in this namespace, so
+# no ReferenceGrant is involved.
+#
+# api.tickets.lan still exists on the gateway's own HTTPRoute — it is what curl and
+# the simulator use, and keeping it means debugging the API never depends on the
+# frontend being deployed.
+#
+# The hostname is app.tickets.lan and NOT the bare tickets.lan: the Gateway listener
+# is *.tickets.lan and so is the cert cert-manager issued from it, and a wildcard
+# does not match the apex. Serving the apex would mean a second listener plus a
+# second name on the certificate, to gain nothing.
+# NOTE: group/kind/weight below are the API's own defaults, written out explicitly
+# so Argo CD does not diff the manifest against a live object that has them.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: web
+  namespace: tickets
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: tickets
+      namespace: envoy-gateway-system
+      sectionName: https
+  hostnames:
+    - app.tickets.lan
+  rules:
+    - matches:
+        - path: {type: PathPrefix, value: /api}
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: gateway
+          port: 80
+          weight: 1
+    - matches:
+        - path: {type: PathPrefix, value: /}
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: web
+          port: 80
+          weight: 1

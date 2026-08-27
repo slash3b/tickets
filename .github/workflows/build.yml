@@ -23,6 +23,7 @@ on:
       - 'go.mod'
       - 'go.sum'
       - 'Dockerfile'
+      - 'web/**'
       - '.github/workflows/build.yml'
   workflow_dispatch:
 
@@ -86,11 +87,35 @@ jobs:
         run: |
           set -euo pipefail
           SHA=${{ github.sha }}
+          OWNER=${{ github.repository_owner }}
 
-          # Services are whatever has a main package. Adding one needs no edit here.
+          # PIN BY IMAGE NAME, NOT BY DIRECTORY NAME.
+          #
+          # This used to look for deploy/apps/$svc/kustomization.yaml, which only
+          # works when a service happens to have a kustomization named after it.
+          # bank and hello did; gateway, workers, simulator and seeder are all
+          # declared inside deploy/apps/tickets/, so they matched nothing and were
+          # silently skipped — they sat at `newTag: latest` from the day they were
+          # written. Argo CD saw no manifest change, so it never rolled them out,
+          # and a "Synced/Healthy" app was running whatever :latest happened to be
+          # when the pod last started. Grep for the image instead: wherever it is
+          # declared is where it gets pinned.
+          pin() {
+            local image=$1 found=
+            for k in deploy/apps/*/kustomization.yaml; do
+              grep -q "name: $image\$" "$k" || continue
+              (cd "$(dirname "$k")" && kustomize edit set image "$image:$SHA")
+              echo "pinned $image -> $SHA  ($k)"
+              found=yes
+            done
+            [ -n "$found" ] || echo "$image is not declared in any kustomization; image pushed, nothing to pin"
+          }
+
+          # Go services are whatever has a main package, built by the shared
+          # Dockerfile at the repo root. Adding one needs no edit here.
           for dir in services/*/cmd; do
             svc=$(basename "$(dirname "$dir")")
-            image=ghcr.io/${{ github.repository_owner }}/tickets-$svc
+            image=ghcr.io/$OWNER/tickets-$svc
 
             echo "::group::$svc"
             docker buildx build \
@@ -101,16 +126,23 @@ jobs:
               --cache-from type=gha,scope=$svc \
               --cache-to   type=gha,scope=$svc,mode=max \
               --push .
-
-            # Pin the tag in the manifest, if this service is deployed at all.
-            if [ -f "deploy/apps/$svc/kustomization.yaml" ]; then
-              (cd "deploy/apps/$svc" && kustomize edit set image "$image:$SHA")
-              echo "pinned $svc -> $SHA"
-            else
-              echo "$svc has no deploy/apps entry; image pushed, nothing to pin"
-            fi
+            pin "$image"
             echo "::endgroup::"
           done
+
+          # The frontend is the one image that is not a Go binary, so it has its
+          # own Dockerfile and is built outside the loop rather than bent into it.
+          echo "::group::web"
+          image=ghcr.io/$OWNER/tickets-web
+          docker buildx build \
+            --file web/Dockerfile \
+            --tag "$image:$SHA" \
+            --tag "$image:latest" \
+            --cache-from type=gha,scope=web \
+            --cache-to   type=gha,scope=web,mode=max \
+            --push .
+          pin "$image"
+          echo "::endgroup::"
 
       - name: Commit the pins
         run: |

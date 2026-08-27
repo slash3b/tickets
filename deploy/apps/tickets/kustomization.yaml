@@ -7,6 +7,7 @@ resources:
 - workers.yaml
 - simulator.yaml
 - seeder.yaml
+- web.yaml
 images:
 - name: ghcr.io/slash3b/tickets-gateway
   newTag: latest
@@ -15,4 +16,6 @@ images:
 - name: ghcr.io/slash3b/tickets-simulator
   newTag: latest
 - name: ghcr.io/slash3b/tickets-seeder
+  newTag: latest
+- name: ghcr.io/slash3b/tickets-web
   newTag: latest

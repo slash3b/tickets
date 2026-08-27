@@ -1,11 +1,17 @@
-# The build context is uploaded to the daemon on every build. Without this the
-# whole repo went — 23MB, of which 4.4MB was .git, none of it used by the build.
+# The build context is uploaded on every build. Without this the whole repo went —
+# 23MB, of which 4.4MB was .git, none of it used.
+#
+# An allowlist rather than a denylist: new junk in the repo cannot silently start
+# being shipped, which is the failure mode a denylist has.
 *
 !go.mod
 !go.sum
 !pkg/
 !services/
+!web/
 
-# Never ship test files or fixtures into an image.
+# Never ship tests, fixtures, or a local node_modules into an image.
 **/*_test.go
 **/testdata/
+web/node_modules/
+web/dist/
