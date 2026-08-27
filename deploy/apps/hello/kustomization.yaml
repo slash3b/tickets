@@ -9,4 +9,4 @@ resources:
 images:
 - name: ghcr.io/slash3b/tickets-hello
   newName: ghcr.io/slash3b/tickets-hello
-  newTag: a12b8ac3d31b03a43c9eebcbae016062f59e4646
+  newTag: ec65400de3dccc165b04a3103e950da92a7202c2
