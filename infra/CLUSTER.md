@@ -413,6 +413,45 @@ TEARDOWN 2026-08-23 - CINEPLEX
   To make the removal permanent at the source, delete k8s/base from that repo.
 
 
+CONTROL PLANE DNS - BROKEN BY TAILSCALE, FIXED 2026-08-27
+---------------------------------------------------------
+
+  SYMPTOM: pods scheduled on k8s-ctrl-plane could not pull images.
+    Failed to pull ... lookup ghcr.io on [fd7a:115c:a1e0::53]:53: server misbehaving
+  fd7a:115c:a1e0::/48 is Tailscale's range - that is MagicDNS failing on public names.
+
+  CAUSE: tailscale had REPLACED /etc/resolv.conf, a systemd-resolved symlink, with a
+  static file pointing only at its own resolvers. Both workers were unaffected; only
+  the control plane runs tailscaled.
+
+  WHY IT APPEARED WHEN IT DID, and this is the useful part: it was latent for months.
+  The control plane was tainted, so no application pod ever ran there and it never had
+  to pull an application image. UNTAINTING IT on 2026-08-24 made it a scheduling target
+  for the first time, and the very next deploy landed there and failed. Removing a taint
+  does not only add capacity - it starts exercising code paths on that node that were
+  never exercised before.
+
+  FIX:
+    sudo tailscale set --accept-dns=false      # stop tailscale owning DNS
+    sudo ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
+    sudo systemctl restart systemd-resolved
+  accept-dns=false alone is NOT enough: tailscale replaced the symlink with a regular
+  file and does not restore it, so the symlink has to be recreated by hand.
+  Tailscale connectivity is unaffected; only MagicDNS short names stop resolving here.
+  Backup of the tailscale-written file: /root/resolv.conf.tailscale-2026-08-27.bak
+
+  WATCH FOR: a tailscale upgrade or re-auth may take resolv.conf back. If image pulls
+  start failing on the control plane again, check /etc/resolv.conf is still a symlink.
+
+  SSH HOST KEY also changed around the same reboot. Verified out-of-band through the
+  Proxmox guest agent rather than over the connection being trusted:
+    qm guest exec 800 -- /bin/cat /etc/ssh/ssh_host_ed25519_key.pub
+  matched what the network offered (SHA256:Ro/SHox0uvyks6ziKPi2N3DyDxiRR54UzhPe8AfpXIk),
+  so it was a regenerated key, not an interception. This is the second time this trick
+  has been needed - the hypervisor and the kubelet are both channels that do not depend
+  on the SSH connection in question.
+
+
 OBSERVABILITY - SIGNOZ, INSTALLED 2026-08-24
 --------------------------------------------
 
@@ -443,6 +482,20 @@ OBSERVABILITY - SIGNOZ, INSTALLED 2026-08-24
     curl -k https://signoz.tickets.lan/api/v1/version     -> {"setupCompleted":false}
   The collector's OTLP pipeline is configuration delivered over OpAMP, not static
   config, which is why an empty database disables data ingestion entirely.
+
+  LOG COLLECTION FEEDBACK LOOP - fixed 2026-08-27. ClickHouse logs every query it
+  runs. The k8s-infra agent collected those logs and INSERTed them into ClickHouse,
+  which logged the insert, which was collected again. Measured at ~20,000 records per
+  minute on a COMPLETELY IDLE cluster - 41,912 of 42,000 in a two-minute sample came
+  from the clickhouse container - with ClickHouse pinned near its 4Gi limit and burning
+  three CPU cores ingesting its own chatter.
+  The chart's presets.logsCollection.blacklist.signozLogs is already true and does NOT
+  catch it: the ClickHouse pods are created by the clickhouse-operator from a
+  ClickHouseInstallation CR, not by the Helm release, so they never carry the labels
+  that filter matches on. Excluding the container by name works:
+    presets.logsCollection.blacklist.containers: [clickhouse]
+  Rate afterwards: ~200-400/minute. Any log store that ingests its own logs will do
+  this; check for it whenever one is installed.
 
   ARGO CD PERMANENT OutOfSync, fixed with ignoreDifferences in
   deploy/argocd/apps/signoz.yaml. Two server-side defaults the chart never renders:

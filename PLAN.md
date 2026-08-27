@@ -353,7 +353,15 @@ delivers code from git commit to running pod with no human step.
        EXIT TEST: change a string, push, and watch it reach the cluster untouched by hand.
        This is the single most valuable step in phase 0 and it is worth more than it
        looks - every later service is this service with logic added.
-  0.6  observability. SigNoz, plus metrics-server which the cluster is missing entirely.
+  0.6  observability. SigNoz + k8s-infra + metrics-server.        DONE 2026-08-27
+       VERIFIED: one request to hello produced a trace, a log line retrievable BY that
+       trace's id, and a metric. The log was fetched with WHERE trace_id = ..., not by
+       grepping text - correlation is structural.
+       Four things had to be fixed to get there, all recorded in CLUSTER.md: SigNoz
+       will not configure its collector until an org exists, a ClickHouse log feedback
+       loop at 20k records/minute, permanent Argo OutOfSync from server-side defaults,
+       and control-plane DNS broken by Tailscale.
+       Original plan text follows.
          a) metrics-server              EXIT TEST: kubectl top nodes returns numbers
          b) SigNoz - ClickHouse, query service, OTel collector, behind an ingress host
          c) k8s-infra DaemonSet         EXIT TEST: every node and pod visible in SigNoz
