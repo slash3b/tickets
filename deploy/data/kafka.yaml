@@ -43,9 +43,16 @@ spec:
                   - key: kubernetes.io/hostname
                     operator: In
                     values: [k8s-node-1]
+  # Sized for a homelab under one showing a day, not for throughput. The JVM heap
+  # is set EXPLICITLY because Kafka otherwise sizes it from the container limit and
+  # leaves nothing for page cache — and page cache is where Kafka actually gets its
+  # speed. 1Gi heap inside a 1.5Gi limit leaves ~512Mi for it.
   resources:
-    requests: {cpu: 200m, memory: 1Gi}
-    limits:   {memory: 2Gi}
+    requests: {cpu: 100m, memory: 768Mi}
+    limits:   {memory: 1536Mi}
+  jvmOptions:
+    -Xms: 512m
+    -Xmx: 1024m
 ---
 apiVersion: kafka.strimzi.io/v1beta2
 kind: Kafka
@@ -85,5 +92,11 @@ spec:
   entityOperator:
     # Gives us KafkaTopic and KafkaUser CRs, which is what puts topic definitions
     # and their retention in git rather than in a broker's memory.
-    topicOperator: {}
-    userOperator: {}
+    topicOperator:
+      resources:
+        requests: {cpu: 25m, memory: 128Mi}
+        limits:   {memory: 256Mi}
+    userOperator:
+      resources:
+        requests: {cpu: 25m, memory: 128Mi}
+        limits:   {memory: 256Mi}
