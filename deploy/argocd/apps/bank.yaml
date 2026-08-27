@@ -1,0 +1,23 @@
+# The fake bank. Wave 4, same as hello: needs the Gateway (3) for its HTTPRoute.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: bank
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/slash3b/tickets.git
+    targetRevision: main
+    path: deploy/apps/bank
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

@@ -1,0 +1,86 @@
+# The fake bank. It is SUPPOSED to misbehave — that is its entire job.
+#
+# Exposed on a hostname so the chaos dial is reachable from a laptop:
+#   curl -X PUT https://bank.tickets.lan/config -d '{"outage":true}'
+# Watching the rest of the system react to that is the point of having it.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bank
+  namespace: bank
+  labels: {app: bank}
+spec:
+  replicas: 1          # making the antagonist highly available would be absurd
+  selector:
+    matchLabels: {app: bank}
+  template:
+    metadata:
+      labels: {app: bank}
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: bank
+          image: ghcr.io/slash3b/tickets-bank:latest   # CI rewrites this
+          imagePullPolicy: IfNotPresent
+          ports:
+            - {name: http, containerPort: 8080}
+          env:
+            - {name: PORT,  value: "8080"}
+            - {name: DEBUG, value: "false"}
+            - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "signoz-otel-collector.signoz.svc.cluster.local:4318"}
+            # Tame defaults. Turn these savage deliberately, not by accident.
+            - {name: DECLINE_RATE, value: "0.05"}
+            - {name: TIMEOUT_RATE, value: "0.01"}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits:   {memory: 64Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          livenessProbe:
+            httpGet: {path: /livez, port: http}
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bank
+  namespace: bank
+spec:
+  selector: {app: bank}
+  ports:
+    - {name: http, port: 80, targetPort: http}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: bank
+  namespace: bank
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: tickets
+      namespace: envoy-gateway-system
+      sectionName: https
+  hostnames:
+    - bank.tickets.lan
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: bank
+          port: 80
+          weight: 1
