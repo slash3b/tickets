@@ -28,6 +28,51 @@ clickhouse:
     requests: {cpu: 200m, memory: 1Gi}
     limits:   {memory: 4Gi}
 
+  # DISABLE CLICKHOUSE'S OWN SELF-DIAGNOSTIC TABLES.
+  #
+  # By default ClickHouse records extremely detailed telemetry ABOUT ITSELF into
+  # system.*_log tables. Measured on this cluster after three days:
+  #
+  #   system.zookeeper_log   16.98 GiB   214,005,617 rows
+  #   system.trace_log        9.83 GiB   470,600,466 rows
+  #   system.text_log         3.06 GiB   101,683,787 rows
+  #   ...plus query_thread_log, processors_profile_log, part_log
+  #   ----------------------------------------------------------------
+  #   ~31 GiB of self-diagnostics against 5.25 GiB of actual telemetry
+  #
+  # Merging those tables was consuming an ENTIRE NODE — node-2 sat at 97% CPU with
+  # zero queries running, doing nothing but compacting its own navel-gazing. It
+  # also took node-2's disk from 3% to 48%.
+  #
+  # trace_log is the sampling query profiler; zookeeper_log records every single
+  # ZooKeeper operation, which is why the log feedback loop inflated it so
+  # violently. None of it is useful here — real observability lives in SigNoz,
+  # which is the thing this database exists to serve.
+  #
+  # query_log and metric_log are KEPT: query_log is how you find a slow query, and
+  # both are small. Everything else is removed at the config level, so it stops
+  # being written rather than being cleaned up afterwards.
+  files:
+    config.d/disable-system-logs.xml: |
+      <clickhouse>
+        <trace_log remove="1"/>
+        <zookeeper_log remove="1"/>
+        <text_log remove="1"/>
+        <processors_profile_log remove="1"/>
+        <query_thread_log remove="1"/>
+        <query_views_log remove="1"/>
+        <part_log remove="1"/>
+        <asynchronous_metric_log remove="1"/>
+        <session_log remove="1"/>
+        <blob_storage_log remove="1"/>
+        <query_log>
+          <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+        </query_log>
+        <metric_log>
+          <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+        </metric_log>
+      </clickhouse>
+
   zookeeper:
     # Required by the ClickHouse operator for coordination even at one shard,
     # one replica. Not optional, and not the same thing as Kafka's old ZooKeeper.
