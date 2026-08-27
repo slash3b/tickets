@@ -9,4 +9,4 @@ resources:
 # is actually deployed.
 images:
 - name: ghcr.io/slash3b/tickets-hello
-  newTag: 6da6ac4a98a732d4f5124155cfba8a57c6b4bf02
+  newTag: c48a869eec84def4c8dbc3f16b940f24901d11bb
