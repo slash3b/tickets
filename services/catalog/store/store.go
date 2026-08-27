@@ -122,6 +122,39 @@ func (s *Store) ListOnSale(ctx context.Context, limit int) ([]*Event, error) {
 	return out, rows.Err()
 }
 
+// FindVenueByName returns a venue id, or uuid.Nil if there is none.
+func (s *Store) FindVenueByName(ctx context.Context, name string) (uuid.UUID, error) {
+	var id uuid.UUID
+	err := s.db.QueryRow(ctx, `SELECT id FROM catalog.venues WHERE name = $1 LIMIT 1`, name).Scan(&id)
+	if err != nil {
+		return uuid.Nil, nil
+	}
+	return id, nil
+}
+
+// FirstSectionID returns a venue's first section, or uuid.Nil.
+func (s *Store) FirstSectionID(ctx context.Context, venueID uuid.UUID) (uuid.UUID, error) {
+	var id uuid.UUID
+	err := s.db.QueryRow(ctx,
+		`SELECT id FROM catalog.sections WHERE venue_id = $1 ORDER BY display_order, name LIMIT 1`,
+		venueID).Scan(&id)
+	if err != nil {
+		return uuid.Nil, nil
+	}
+	return id, nil
+}
+
+// CountEventsStartingOn reports how many events begin on a given day.
+//
+// This is how the daily seeder stays idempotent: a CronJob that runs twice, or a
+// pod that is retried, must not produce two showings.
+func (s *Store) CountEventsStartingOn(ctx context.Context, day time.Time) (int, error) {
+	var n int
+	err := s.db.QueryRow(ctx,
+		`SELECT count(*) FROM catalog.events WHERE starts_at::date = $1::date`, day).Scan(&n)
+	return n, err
+}
+
 func (s *Store) GetEvent(ctx context.Context, id uuid.UUID) (*Event, error) {
 	var e Event
 	err := s.db.QueryRow(ctx,

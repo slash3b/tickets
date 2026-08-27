@@ -1,0 +1,43 @@
+# One showing a day. This is what keeps the system permanently doing something
+# real without anybody deciding to give it work.
+#
+# The standing rule for this project is one showing per day, quietly. An on-sale
+# burst is something a human triggers through the simulator's /config dial, never
+# something that happens on its own.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: seeder
+  namespace: tickets
+spec:
+  # 03:00, so a fresh showing is on sale before anyone looks.
+  schedule: "0 3 * * *"
+  # If the cluster was down at 03:00, do not fire a backlog of runs at once.
+  startingDeadlineSeconds: 3600
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      template:
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            seccompProfile: {type: RuntimeDefault}
+          containers:
+            - name: seeder
+              image: ghcr.io/slash3b/tickets-seeder:latest   # CI rewrites this
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef: {name: tickets-pg-app, key: uri}
+              resources:
+                requests: {cpu: 10m, memory: 32Mi}
+                limits:   {memory: 96Mi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: {drop: [ALL]}
