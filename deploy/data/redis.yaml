@@ -62,7 +62,8 @@ spec:
           ports:
             - {name: redis, containerPort: 6379}
           resources:
-            requests: {cpu: 25m, memory: 128Mi}
+            # Measured at 9Mi in use. maxmemory 512mb is the real ceiling.
+            requests: {cpu: 25m, memory: 64Mi}
             # Limit sits above maxmemory so Redis evicts on its own terms rather
             # than being killed by the kernel first.
             limits:   {memory: 768Mi}

@@ -6,7 +6,7 @@
 # runbooks. Operating a database through an operator is itself one of the things
 # worth learning here.
 resources:
-  requests: {cpu: 50m, memory: 128Mi}
+  requests: {cpu: 25m, memory: 64Mi}
   limits:   {memory: 256Mi}
 
 # No Prometheus Operator on this cluster — SigNoz collects via its own agent, which

@@ -54,7 +54,7 @@ spec:
   # leaves nothing for page cache — and page cache is where Kafka actually gets its
   # speed. 1Gi heap inside a 1.5Gi limit leaves ~512Mi for it.
   resources:
-    requests: {cpu: 100m, memory: 768Mi}
+    requests: {cpu: 100m, memory: 512Mi}
     limits:   {memory: 1536Mi}
   jvmOptions:
     -Xms: 512m

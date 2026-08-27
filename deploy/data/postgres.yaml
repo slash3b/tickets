@@ -34,7 +34,10 @@ spec:
     storageClass: local-path
 
   resources:
-    requests: {cpu: 100m, memory: 512Mi}
+    # Idle Postgres uses ~66Mi. The request is a scheduling reservation, so an
+    # inflated one wastes capacity nobody else can use; the limit is what stops it
+    # running away. Measured, not guessed.
+    requests: {cpu: 50m, memory: 256Mi}
     limits:   {memory: 2Gi}
 
   bootstrap:

@@ -6,5 +6,5 @@
 # rather than by running kafka-topics.sh against a broker.
 watchAnyNamespace: true
 resources:
-  requests: {cpu: 100m, memory: 256Mi}
+  requests: {cpu: 50m, memory: 192Mi}
   limits:   {memory: 512Mi}
