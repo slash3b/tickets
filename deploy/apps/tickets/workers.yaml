@@ -1,0 +1,58 @@
+# The singletons: the two inventory sweepers, the payment reconciler and the
+# order resumer.
+#
+# REPLICAS IS 1 AND MUST STAY 1. Nothing here is unsafe concurrently — every
+# operation is idempotent — but N replicas do N times the work on the same rows
+# and manufacture the lock contention the rest of the design avoids. The payment
+# reconciler would also multiply traffic to the one dependency you least want to
+# hammer. They live in their own Deployment precisely so that scaling the API
+# cannot accidentally scale them.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: workers
+  namespace: tickets
+  labels: {app: workers}
+spec:
+  replicas: 1
+  strategy:
+    # Recreate, not RollingUpdate: a rolling update would briefly run two copies,
+    # which is the one thing this Deployment exists to prevent.
+    type: Recreate
+  selector:
+    matchLabels: {app: workers}
+  template:
+    metadata:
+      labels: {app: workers}
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: workers
+          image: ghcr.io/slash3b/tickets-workers:latest
+          ports:
+            - {name: http, containerPort: 8080}
+          env:
+            - {name: PORT, value: "8080"}
+            - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "signoz-otel-collector.signoz.svc.cluster.local:4318"}
+            - {name: BANK_URL, value: "http://bank.bank.svc.cluster.local"}
+            - {name: SWEEP_INTERVAL, value: "30s"}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: {name: tickets-pg-app, key: uri}
+          resources:
+            requests: {cpu: 25m, memory: 48Mi}
+            limits:   {memory: 128Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          livenessProbe:
+            httpGet: {path: /livez, port: http}
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 5

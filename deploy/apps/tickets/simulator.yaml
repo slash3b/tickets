@@ -1,0 +1,79 @@
+# The load. Deliberately quiet by default — two arrivals a minute, most of them
+# browsers who never buy.
+#
+# Exposed on a hostname so the dial is reachable without a redeploy:
+#   curl -X PUT https://sim.tickets.lan/config -d '{"arrivals_per_minute":200,...}'
+#   curl https://sim.tickets.lan/stats
+# An on-sale is something you trigger, never a default.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: simulator
+  namespace: tickets
+  labels: {app: simulator}
+spec:
+  replicas: 1          # THIS is the load dial for a real burst: scale it up
+  selector:
+    matchLabels: {app: simulator}
+  template:
+    metadata:
+      labels: {app: simulator}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: simulator
+          image: ghcr.io/slash3b/tickets-simulator:latest
+          ports:
+            - {name: http, containerPort: 8080}
+          env:
+            - {name: PORT, value: "8080"}
+            - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "signoz-otel-collector.signoz.svc.cluster.local:4318"}
+            - {name: GATEWAY_URL, value: "http://gateway.tickets.svc.cluster.local"}
+            - {name: ARRIVALS_PER_MINUTE, value: "2"}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits:   {memory: 96Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          livenessProbe:
+            httpGet: {path: /livez, port: http}
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: simulator
+  namespace: tickets
+spec:
+  selector: {app: simulator}
+  ports:
+    - {name: http, port: 80, targetPort: http}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: simulator
+  namespace: tickets
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: tickets
+      namespace: envoy-gateway-system
+      sectionName: https
+  hostnames:
+    - sim.tickets.lan
+  rules:
+    - matches:
+        - path: {type: PathPrefix, value: /}
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: simulator
+          port: 80
+          weight: 1

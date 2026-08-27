@@ -1,0 +1,27 @@
+# The application itself: gateway, workers and simulator. Wave 5 — after the
+# Gateway (3) for the HTTPRoutes and after the data plane (4) for Postgres.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tickets
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/slash3b/tickets.git
+    targetRevision: main
+    path: deploy/apps/tickets
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff: {duration: 20s, factor: 2, maxDuration: 3m}
