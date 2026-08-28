@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"github.com/slash3b/tickets/pkg/obs"
+
+	"go.uber.org/zap"
 )
 
 type Status string
@@ -73,6 +75,10 @@ type Bank struct {
 	// rand is seeded per instance so tests can be deterministic by setting rates
 	// to 0 or 1 rather than by controlling the seed.
 	rnd *rand.Rand
+
+	// lg may be nil in tests, which construct a Bank directly. Handler is the only
+	// consumer and substitutes a no-op logger.
+	lg *zap.Logger
 }
 
 func New(cfg Config) *Bank {
@@ -81,6 +87,13 @@ func New(cfg Config) *Bank {
 		cfg:   cfg,
 		rnd:   rand.New(rand.NewPCG(rand.Uint64(), rand.Uint64())),
 	}
+}
+
+// WithLogger attaches the service logger. Separate from New so the many tests
+// that build a Bank for its behaviour do not each have to invent a logger.
+func (b *Bank) WithLogger(lg *zap.Logger) *Bank {
+	b.lg = lg
+	return b
 }
 
 func (b *Bank) SetConfig(cfg Config) {
@@ -108,7 +121,11 @@ func (b *Bank) Handler() http.Handler {
 	// Only /authorize is traced. It is the call the payment saga actually makes,
 	// and the one whose latency is the whole point of this service existing. The
 	// config and lookup endpoints are operator tools, not part of any request path.
-	obs.Route(mux, "POST /authorize", b.authorize)
+	lg := b.lg
+	if lg == nil {
+		lg = zap.NewNop()
+	}
+	obs.Route(mux, lg, "POST /authorize", b.authorize)
 	mux.HandleFunc("PUT /config", b.setConfig)
 	mux.HandleFunc("GET /charges/{key}", b.lookup)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {

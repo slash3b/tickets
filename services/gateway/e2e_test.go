@@ -21,6 +21,8 @@ import (
 	paystore "github.com/slash3b/tickets/services/payments/store"
 
 	"github.com/slash3b/tickets/pkg/obs"
+
+	"go.uber.org/zap"
 )
 
 // paymentsAdapter is the bridge orders needs: charge an order, once.
@@ -103,6 +105,9 @@ func buildSystem(t *testing.T, bankCfg bank.Config) (*httptest.Server, *catalogs
 		InventoryAdapter{S: inv},
 		OrdersAdapter{S: ord, Saga: saga},
 		5*time.Minute,
+		// Access logs are asserted nowhere; a real logger here would just spray
+		// the test output. The correlation they carry is covered by the trace test.
+		zap.NewNop(),
 	)
 
 	srv := httptest.NewServer(api.Handler())

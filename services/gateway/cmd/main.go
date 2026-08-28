@@ -101,6 +101,7 @@ func run() error {
 		invAdapter,
 		gateway.OrdersAdapter{S: ord, Saga: saga},
 		holdTTL,
+		lg,
 	)
 
 	mux := http.NewServeMux()

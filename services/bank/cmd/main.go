@@ -64,7 +64,7 @@ func run() error {
 		zap.Float64("timeout_rate", cfg.TimeoutRate))
 
 	mux := http.NewServeMux()
-	mux.Handle("/", bank.New(cfg).Handler())
+	mux.Handle("/", bank.New(cfg).WithLogger(lg).Handler())
 	health.New(lg).Register(ctx, mux, 2*time.Second, 15*time.Second)
 
 	srv := &http.Server{Addr: ":" + port, Handler: mux, ReadHeaderTimeout: 10 * time.Second}

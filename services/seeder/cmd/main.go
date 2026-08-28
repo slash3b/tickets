@@ -27,6 +27,7 @@ import (
 	ordersstore "github.com/slash3b/tickets/services/orders/store"
 	paystore "github.com/slash3b/tickets/services/payments/store"
 
+	"github.com/slash3b/tickets/pkg/obs"
 	"go.uber.org/zap"
 )
 
@@ -45,6 +46,8 @@ func main() {
 	}
 }
 
+const version = "0.1.0"
+
 func run() error {
 	dsn := env.Get("DATABASE_URL", "")
 	if dsn == "" {
@@ -54,8 +57,27 @@ func run() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	lg, flush := logger.MustNew("seeder", env.Get("DEBUG", "false") == "true", nil)
+	// The seeder used to pass nil here and never call obs.Setup at all, so the one
+	// job that decides whether there is anything to sell tomorrow reported nothing
+	// to the backend — and a CronJob is precisely the thing you cannot watch by
+	// eye. Its pod is gone by the time you wonder whether it ran.
+	shutdownObs, logProvider, err := obs.Setup(ctx, "seeder", version,
+		env.Get("OTEL_EXPORTER_OTLP_ENDPOINT", ""))
+	if err != nil {
+		return fmt.Errorf("observability: %w", err)
+	}
+
+	lg, flush := logger.MustNew("seeder", env.Get("DEBUG", "false") == "true", logProvider)
 	defer func() { _ = flush() }()
+
+	// A CronJob exits immediately after its work. Without an explicit flush the
+	// last batch of logs and spans dies with the process, which for a job that
+	// runs for two seconds is nearly all of them.
+	defer func() {
+		drain, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = shutdownObs(drain)
+	}()
 
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 
 	"github.com/slash3b/tickets/pkg/obs"
 )
@@ -73,10 +74,11 @@ type API struct {
 	inventory Inventory
 	orders    Orders
 	holdTTL   time.Duration
+	lg        *zap.Logger
 }
 
-func New(c Catalog, i Inventory, o Orders, holdTTL time.Duration) *API {
-	return &API{catalog: c, inventory: i, orders: o, holdTTL: holdTTL}
+func New(c Catalog, i Inventory, o Orders, holdTTL time.Duration, lg *zap.Logger) *API {
+	return &API{catalog: c, inventory: i, orders: o, holdTTL: holdTTL, lg: lg}
 }
 
 func (a *API) Handler() http.Handler {
@@ -84,14 +86,14 @@ func (a *API) Handler() http.Handler {
 	// obs.Route, not mux.HandleFunc: each route gets a server span named after the
 	// PATTERN, so "GET /api/events/{id}" stays one span name instead of one per
 	// event id. See pkg/obs/http.go for why that is done per route.
-	obs.Route(mux, "GET /api/events", a.listEvents)
-	obs.Route(mux, "GET /api/events/{id}", a.getEvent)
-	obs.Route(mux, "GET /api/events/{id}/sections", a.listSections)
-	obs.Route(mux, "GET /api/events/{id}/sections/{sid}", a.sectionSeats)
-	obs.Route(mux, "POST /api/holds", a.createHold)
-	obs.Route(mux, "DELETE /api/holds/{id}", a.releaseHold)
-	obs.Route(mux, "POST /api/orders", a.createOrder)
-	obs.Route(mux, "GET /api/orders/{id}", a.getOrder)
+	obs.Route(mux, a.lg, "GET /api/events", a.listEvents)
+	obs.Route(mux, a.lg, "GET /api/events/{id}", a.getEvent)
+	obs.Route(mux, a.lg, "GET /api/events/{id}/sections", a.listSections)
+	obs.Route(mux, a.lg, "GET /api/events/{id}/sections/{sid}", a.sectionSeats)
+	obs.Route(mux, a.lg, "POST /api/holds", a.createHold)
+	obs.Route(mux, a.lg, "DELETE /api/holds/{id}", a.releaseHold)
+	obs.Route(mux, a.lg, "POST /api/orders", a.createOrder)
+	obs.Route(mux, a.lg, "GET /api/orders/{id}", a.getOrder)
 	return mux
 }
 

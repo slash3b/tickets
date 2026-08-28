@@ -10,6 +10,9 @@ import (
 
 	"github.com/exaring/otelpgx"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.uber.org/zap"
+
+	"github.com/slash3b/tickets/pkg/logger"
 )
 
 // sqlSpanName collapses a statement to a single readable line.
@@ -38,8 +41,8 @@ func sqlSpanName(stmt string) string {
 // outer wrapper would have to name the span before it could know. It also means
 // the health endpoints are simply never wrapped — /livez and /readyz fire every
 // few seconds forever and would otherwise be most of the traffic in here.
-func Route(mux *http.ServeMux, pattern string, h http.HandlerFunc) {
-	mux.Handle(pattern, otelhttp.NewHandler(h, pattern))
+func Route(mux *http.ServeMux, lg *zap.Logger, pattern string, h http.HandlerFunc) {
+	mux.Handle(pattern, otelhttp.NewHandler(access(lg, pattern, h), pattern))
 }
 
 // HTTPClient is an http.Client that PROPAGATES trace context.
@@ -94,4 +97,61 @@ func Pool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 		otelpgx.WithDisableConnectionDetailsInAttributes(),
 	)
 	return pgxpool.NewWithConfig(ctx, cfg)
+}
+
+// Access logs one line per request, correlated to the trace.
+//
+// THIS IS THE OTHER HALF OF THE INSTRUMENTATION, and it was missing for the same
+// reason the spans were: pkg/logger built a careful correlation mechanism and the
+// only caller was the hello canary. The gateway served every request in this
+// system and logged nothing but "listening".
+//
+// It runs INSIDE otelhttp's handler, not outside it, so the context already
+// carries the span — which is what puts a real TraceId on the OTLP record rather
+// than a string in the body.
+func access(lg *zap.Logger, route string, h http.HandlerFunc) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+
+		h(rec, r)
+
+		// LEVEL BY WHO IS AT FAULT, not by whether the response was a success.
+		// A 409 means someone else took the seat first — that is this system
+		// working exactly as designed, and logging it as an error would bury the
+		// real ones. Only 5xx is ours.
+		log := logger.Ctx(r.Context(), lg).Info
+		if rec.status >= 500 {
+			log = logger.Ctx(r.Context(), lg).Error
+		}
+		log("request",
+			zap.String("route", route),
+			zap.String("method", r.Method),
+			zap.Int("status", rec.status),
+			zap.Duration("took", time.Since(start)),
+		)
+	})
+}
+
+// statusRecorder remembers the status code, which net/http otherwise discards the
+// moment it is written.
+type statusRecorder struct {
+	http.ResponseWriter
+	status  int
+	written bool
+}
+
+func (s *statusRecorder) WriteHeader(code int) {
+	if !s.written {
+		s.status, s.written = code, true
+	}
+	s.ResponseWriter.WriteHeader(code)
+}
+
+// Write covers handlers that never call WriteHeader — net/http implies 200 then,
+// and without this the recorder would report 200 for a handler that wrote a body
+// after an explicit WriteHeader we missed.
+func (s *statusRecorder) Write(b []byte) (int, error) {
+	s.written = true
+	return s.ResponseWriter.Write(b)
 }
