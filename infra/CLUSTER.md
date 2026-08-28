@@ -600,6 +600,37 @@ OBSERVABILITY - SIGNOZ, INSTALLED 2026-08-24
   running through the gateway into the bank. Logs and traces are joined by id
   across three services, not by squinting at timestamps.
 
+  THE SERVICES TAB IS BUILT FROM SPANS, which is why it was missing half the
+  system until 2026-08-28. workers and seeder run background loops and never
+  started a span, and a process that emits no spans is not a service as far as APM
+  is concerned - it does not matter how much it is doing. web is nginx and will
+  never appear; it has no OTel in it at all, by choice.
+
+  Fixed by giving the three singletons a span per pass - sweep, reconcile, resume
+  - and the seeder one for its run. BACKGROUND WORK IS THE LEAST OBSERVABLE THING
+  IN THE SYSTEM: nobody waits on it, so nothing complains when it stops. Each span
+  carries what it actually did, because a sweeper reclaiming zero holds forever is
+  either idle or broken and those look identical from outside.
+
+  PER-SERVICE CPU AND MEMORY, added the same day. The k8s-infra DaemonSet already
+  reports k8s.pod.cpu.* and k8s.pod.memory.* - that is the CONTAINER view, keyed by
+  pod name, so it does not survive a rollout and cannot separate a memory climb
+  caused by a leak from one caused by more work. The Go runtime instrumentation now
+  reports the PROCESS view keyed by service.name:
+    go.goroutine.count  go.memory.used  go.memory.allocated  go.memory.gc.goal
+    go.memory.allocations  go.config.gogc  go.processor.limit
+  Baseline 2026-08-28: gateway 19 goroutines / 14.5MiB, workers 18 / 12.6MiB,
+  simulator 18 / 11.8MiB, bank 15 / 11.2MiB, hello 12 / 10.2MiB.
+
+  POOL METRICS answer the open pgbouncer question in DESIGN.md with data rather
+  than opinion: pgxpool.acquire_duration, pgxpool.empty_acquire_wait_time and
+  pgxpool.acquired_connections are the three that matter. At current load gateway
+  holds 1 connection and workers 4, so the answer today is plainly "no pgbouncer".
+
+  NOTE THE LABEL KEY IS DOTTED. Filtering these in ClickHouse is
+  JSONExtractString(labels,'service.name'), not service_name. Half an hour went
+  into that.
+
   RESOURCE ATTRIBUTES come from OTEL_RESOURCE_ATTRIBUTES in each Deployment, read
   by resource.WithFromEnv. Spans now carry deployment.environment.name=homelab and
   the emitting k8s.pod.name. The manifests build that string with downward-API
