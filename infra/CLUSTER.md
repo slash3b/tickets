@@ -786,9 +786,36 @@ THE APPLICATION - DEPLOYED 2026-08-27
     simulator   the load                https://sim.tickets.lan  (/stats, /config)
     seeder      CronJob 03:00 daily     one showing, idempotent
                 SEED_DAYS_AHEAD=N to create one on demand, N days out. The daily
-                run leaves it unset. It exists because the day's 96 seats DO sell
-                out - the simulator drained them on 2026-08-27 - and after that
-                every request is a browse and half the system emits no traces.
+                run leaves it unset.
+
+  THE SHOWING USED TO SELL OUT IN NINETY MINUTES, and that was twice mistaken for
+  broken instrumentation: with nothing left to sell, holds, orders, payments and
+  the bank emit nothing, and an idle half of a system looks exactly like an
+  unreported one. Repaced 2026-08-28 to last a full day - by changing the buyer
+  MIX to 93% browsers, not by lowering the arrival rate, which would have hit the
+  same target by making the system silent between arrivals. See milestone 5 in
+  DESIGN.md for the arithmetic.
+
+  If the interesting half of the system looks idle, check whether there is
+  anything left to sell before assuming instrumentation broke.
+
+  WIPING ACCUMULATED STATE: scripts/wipe.sh, run ON THE CONTROL PLANE.
+    ssh slash3b@192.168.1.116 'bash -s' < scripts/wipe.sh --all --seed
+  --data is Postgres, --telemetry is ClickHouse, --all is both, --dry-run prints
+  the plan and stops. It pauses the simulator and restores it from a trap, so a
+  failure or a Ctrl-C halfway cannot leave the load generator writing into a
+  half-truncated database.
+
+  IT KEEPS TWO THINGS THAT LOOK LIKE OMISSIONS. catalog.venues, sections and seats
+  describe the cinema, not anything that accumulated - and the seeder looks the
+  venue up BY NAME and returns an error if it is gone rather than creating one, so
+  truncating venues breaks the 03:00 CronJob permanently and fails at 3am where
+  nobody is watching. signoz schema_migrations_v2 is SigNoz's record of which
+  migrations it has applied; truncating it clears no data and makes SigNoz believe
+  it is a fresh install.
+
+  RUN 2026-08-28: 4 showings, 184 orders, 67k spans and 41M metric rows to zero;
+  venue and its 96 seats intact; one fresh showing seeded; simulator restored.
     web         the seat map, React     https://app.tickets.lan
 
   THE SEAT MAP IS SERVED AS STATIC FILES AND NOTHING ELSE. nginx holds the built

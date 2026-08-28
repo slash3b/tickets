@@ -874,7 +874,33 @@ MILESTONES
      sets that make lock ordering matter, and the browser is pure read load - the
      majority of real traffic.
 
-     DEFAULT IS TWO ARRIVALS PER MINUTE, 55% of them browsers who never buy. A
+     REPACED 2026-08-28. The original mix sold 0.5 seats per arrival, so the day's
+     96 seats were gone in about ninety minutes and the system then had nothing
+     left to sell - and that symptom was mistaken for broken instrumentation
+     TWICE, because holds, orders, payments and the bank all go silent and an idle
+     half of a system looks exactly like an unreported one.
+
+     THE FIX WAS THE MIX, NOT THE RATE. Pacing 96 seats across 24h by lowering
+     arrivals needs 0.13 a minute, one session every seven and a half minutes,
+     which reaches the target by making the whole thing quiet - the opposite of
+     what a simulator is for. Rate and pacing are two dials and the old config
+     conflated them. Arrivals stay at 2/min; the mix now runs 93% browsers, which
+     is roughly real ticketing conversion anyway.
+
+     ONLY DECISIVE AND GROUP CONSUME STOCK. Picky RELEASES its hold and abandoner
+     lets it EXPIRE, so both make load without ever reducing the seat count.
+     Mistaking those two for buyers is what made a moderate-looking mix sell out
+     in ninety minutes.
+
+       seats/arrival = decisive*1 + group*3 = 0.015 + 0.018 = 0.033
+       seats/day     = 0.033 * 2 * 1440     = 95, against stock of 96
+
+     Every profile still runs often enough to matter: ~86 picky sessions a day
+     churning holds and ~58 abandoners feeding the expiry sweeper, which nothing
+     else exercises under real conditions. A test guards the arithmetic and fails
+     if anyone paces with the rate dial again.
+
+     DEFAULT IS TWO ARRIVALS PER MINUTE, 93% of them browsers who never buy. A
      system that is quietly busy is observable and debuggable; one under permanent
      stress is neither. Load goes up only when someone turns it up.
   6  containerise everything, deploy via Argo CD.               DONE 2026-08-27
