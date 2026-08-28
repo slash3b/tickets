@@ -16,7 +16,6 @@ way, so adding one needs no edit to the build workflow.
 | **simulator** | The load. A deployed service, not a test script. | Virtual buyers as state machines across five profiles, arriving as a Poisson process. It is a **client, not a peer**: constructed with nothing but a base URL, no database handle, no privileged path. If it ever needs an internal API, the API is wrong. Dial at `sim.tickets.lan` (`/stats`, `PUT /config`). |
 | **bank** | A deliberately adversarial fake payment processor. | Declines, times out, and sometimes takes the money and says nothing — which is the case the whole payment design exists to survive. Idempotency keys make a retried timeout return the *original* charge rather than double-charging. Chaos dial at `bank.tickets.lan` (`PUT /config`). |
 | **seeder** | A CronJob, not a server. | Creates one showing a day at 03:00, idempotently, so the system permanently has something real to do without anyone deciding to give it work. `SEED_DAYS_AHEAD=N` makes one on demand. |
-| **hello** | The canary. Does nothing useful, on purpose. | Emits one metric, one log line and one span per request, so the whole telemetry path can be proven end to end without involving anything that matters. It is the leftover this project keeps *not* deleting, deliberately. |
 
 ## Compiled into gateway and workers
 

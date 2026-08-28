@@ -116,8 +116,8 @@ func Pool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 // Access logs one line per request, correlated to the trace.
 //
 // THIS IS THE OTHER HALF OF THE INSTRUMENTATION, and it was missing for the same
-// reason the spans were: pkg/logger built a careful correlation mechanism and the
-// only caller was the hello canary. The gateway served every request in this
+// reason the spans were: pkg/logger built a careful correlation mechanism and its
+// only caller was the hello canary, since deleted. The gateway served every request in this
 // system and logged nothing but "listening".
 //
 // It runs INSIDE otelhttp's handler, not outside it, so the context already

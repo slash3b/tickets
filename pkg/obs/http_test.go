@@ -19,7 +19,7 @@ import (
 //
 // pkg/logger builds a careful correlation mechanism — trace_id and span_id as
 // readable strings, plus the context itself for the OTLP bridge — and for weeks
-// the only caller in the entire repo was the hello canary. The gateway served
+// the only caller in the entire repo was the hello canary (since deleted). The gateway served
 // every request in the system and logged nothing but "listening". A log pipeline
 // that receives no logs looks exactly like a broken log pipeline.
 func TestAccessLogIsCorrelated(t *testing.T) {

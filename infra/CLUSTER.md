@@ -743,7 +743,7 @@ ACCESS LAYER - GATEWAY API, MIGRATED 2026-08-27
                             so adding a service no longer involves a certificate.
                             allowedRoutes.namespaces.from: All, so each HTTPRoute
                             lives beside the service it routes to.
-  HTTPRoutes                argocd/argocd, hello/hello, signoz/signoz
+  HTTPRoutes                argocd/argocd, signoz/signoz
 
   THE FAILURE THAT COST THE MOST TIME. Envoy Gateway defaults its Service to
   externalTrafficPolicy: Local. MetalLB then only announces the address from a node
@@ -803,7 +803,7 @@ ACCESS LAYER - GATEWAY API, MIGRATED 2026-08-27
   done local resolution was deleted. Every machine that wants a cluster hostname
   needs /etc/hosts. All of them, in one line:
 
-    192.168.1.240  app.tickets.lan api.tickets.lan argocd.tickets.lan bank.tickets.lan hello.tickets.lan signoz.tickets.lan sim.tickets.lan
+    192.168.1.240  app.tickets.lan api.tickets.lan argocd.tickets.lan bank.tickets.lan signoz.tickets.lan sim.tickets.lan
 
   app.tickets.lan is the seat map - the one a person actually opens.
 

@@ -103,7 +103,7 @@ jobs:
           #
           # This used to look for deploy/apps/$svc/kustomization.yaml, which only
           # works when a service happens to have a kustomization named after it.
-          # bank and hello did; gateway, workers, simulator and seeder are all
+          # bank did; gateway, workers, simulator and seeder are all
           # declared inside deploy/apps/tickets/, so they matched nothing and were
           # silently skipped — they sat at `newTag: latest` from the day they were
           # written. Argo CD saw no manifest change, so it never rolled them out,

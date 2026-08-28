@@ -192,25 +192,27 @@ and nobody else can take them. Only the hard deadline sends an order to reconcil
 SERVICES
 --------
 
-Seven, plus the SPA. The seventh (gateway) exists only because the frontend is a React
+Six, plus the SPA. The seventh (gateway) exists only because the frontend is a React
 SPA; a server-rendered frontend would not need it. Adding an eighth requires a reason
 written down here first.
 
-  hello is that reason, and it is NOT a domain service. It is the platform canary: a
-  service with no business logic that serves /livez and /readyz and emits exactly one
-  metric, one log line and one trace span. It stays permanently.
+  hello WAS that reason - the platform canary, a service with no business logic that
+  emitted one metric, one log line and one trace span so that "did the code break or
+  did the platform break" had a five-second answer. This document argued it should
+  stay permanently. It was DELETED on 2026-08-28.
 
-  WHY IT EARNS ITS PLACE: it is the control variable. When inventory stops producing
-  traces, the question is whether the code broke or the platform broke, and without a
-  known-good service that question costs an hour of debugging the wrong thing. With
-  hello it costs five seconds. It is also the smoke test after every platform change -
-  upgrade Argo CD, ingress-nginx or SigNoz, and the question "does anything still
-  build, deploy and trace" has a cheap answer. And it is the reference implementation:
-  every service here is hello with logic added, so a new service that misbehaves gets
-  diffed against it.
+  WHY THE ARGUMENT STOPPED HOLDING: a control variable only works if it is exercised,
+  and nothing ever called it. It sat at zero requests, which means zero spans, which
+  means it could not answer the one question it existed to answer - and it was absent
+  from the service list for exactly the same reason a genuinely broken service would
+  be. A canary nobody calls does not prove the platform is alive; it proves nothing at
+  all, while looking like it proves something.
 
-  It costs 32Mi and 10m of CPU. If it ever stops being maintained it becomes exactly
-  the kind of leftover this project keeps deleting, so it is maintained deliberately.
+  It was also the reference implementation, and that role is finished: five real
+  services now do the same setup with logic attached, and any of them diffs just as
+  well. What replaces the smoke test is the thing that should have been doing it all
+  along - the simulator, which exercises the whole system continuously and whose
+  divergence check fails loudly when it stops.
 
 Language is Go for every service, over a small shared pkg/ (logger, obs, health, env,
 migrate). That set was lifted from the old cineplex project, whose

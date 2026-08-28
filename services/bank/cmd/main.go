@@ -1,6 +1,6 @@
 // The fake bank as a running service.
 //
-// Deliberately the same shape as hello: pkg/obs for OTLP, pkg/logger for
+// Deliberately the same shape as every other service here: pkg/obs for OTLP, pkg/logger for
 // trace-correlated logs, pkg/health for the probes. Every service in this repo is
 // hello with logic added, and this is the first one to prove that claim.
 package main

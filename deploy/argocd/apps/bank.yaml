@@ -1,4 +1,4 @@
-# The fake bank. Wave 4, same as hello: needs the Gateway (3) for its HTTPRoute.
+# The fake bank. Wave 4: needs the Gateway (wave 3) for its HTTPRoute.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

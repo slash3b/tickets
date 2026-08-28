@@ -9,8 +9,8 @@
 //
 // If OTEL_EXPORTER_OTLP_ENDPOINT is empty, setup is a no-op: the service runs with
 // no exporters and never blocks on a collector that does not exist. That is what
-// makes a service developable on a laptop, and what let hello-service ship before
-// the observability stack existed.
+// makes a service developable on a laptop, and what let the first service ship
+// before the observability stack existed.
 package obs
 
 import (
