@@ -5,7 +5,15 @@
 # ctags
 tags
 
-# Go build output
+# Go build output.
+#
+# /cmd is the trap that actually caught us: `go build ./services/seeder/...` names
+# its output after the LAST PATH ELEMENT, so every service in this repo compiles to
+# a binary called "cmd" in the working directory. A `git add -A` then commits 25M of
+# ELF to a public repo without anybody noticing, which is exactly what happened in
+# c48a869 on 2026-08-27. Anchored with a leading slash so services/*/cmd/ - the
+# actual source directories - stay tracked.
+/cmd
 tmp/
 main
 *.out
