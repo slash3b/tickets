@@ -28,6 +28,11 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 COPY pkg/ pkg/
 COPY services/ services/
+# Generated protobuf and gRPC stubs. Copied explicitly, like everything else here:
+# the .dockerignore allowlist controls what CAN be sent, these COPY lines control
+# what IS. Both had to learn about gen/ — fixing only the first is why this failed
+# twice.
+COPY gen/ gen/
 
 ARG SERVICE
 ARG VERSION=dev
