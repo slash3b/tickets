@@ -10,12 +10,12 @@ resources:
 - web.yaml
 images:
 - name: ghcr.io/slash3b/tickets-gateway
-  newTag: 469ad0deeed01621470c5884b56c2a60cc50f9f4
+  newTag: d1ca7bbbd744bae5d7e467bedf673f77a8e98c48
 - name: ghcr.io/slash3b/tickets-seeder
-  newTag: 469ad0deeed01621470c5884b56c2a60cc50f9f4
+  newTag: d1ca7bbbd744bae5d7e467bedf673f77a8e98c48
 - name: ghcr.io/slash3b/tickets-simulator
-  newTag: 469ad0deeed01621470c5884b56c2a60cc50f9f4
+  newTag: d1ca7bbbd744bae5d7e467bedf673f77a8e98c48
 - name: ghcr.io/slash3b/tickets-web
-  newTag: 469ad0deeed01621470c5884b56c2a60cc50f9f4
+  newTag: d1ca7bbbd744bae5d7e467bedf673f77a8e98c48
 - name: ghcr.io/slash3b/tickets-workers
-  newTag: 469ad0deeed01621470c5884b56c2a60cc50f9f4
+  newTag: d1ca7bbbd744bae5d7e467bedf673f77a8e98c48
