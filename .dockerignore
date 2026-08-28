@@ -9,6 +9,11 @@
 !pkg/
 !services/
 !web/
+# Generated protobuf and gRPC stubs. They are committed rather than generated in
+# the image, so CI needs no buf toolchain — but an allowlist means a new
+# top-level directory is invisible to the build until it is named here, and this
+# one broke every image build the moment the services started speaking gRPC.
+!gen/
 
 # Never ship tests, fixtures, or a local node_modules into an image.
 **/*_test.go
