@@ -578,6 +578,28 @@ OBSERVABILITY - SIGNOZ, INSTALLED 2026-08-24
   but has no points, which is correct - nothing has deadlocked yet, and an OTel
   counter reports nothing until its first Add.
 
+  THE SAME TRAP AGAIN, ONE LAYER DOWN - LOGS. Fixed 2026-08-28. pkg/logger builds
+  a careful correlation mechanism and the ONLY CALLER IN THE REPO WAS THE HELLO
+  CANARY. The gateway served every request in the system and logged two lines,
+  both at startup. SigNoz held, for the whole tickets namespace, 31 simulator
+  lines and nginx access logs from web, and NOT ONE LOG CARRIED A TRACE ID.
+
+  obs.Route now logs one line per request, inside otelhttp's handler so the
+  context already has the span. After: gateway 143 of 147 lines correlated - the
+  four without are startup, which is correct.
+
+  The seeder was worse. It passed nil as the log provider and never called
+  obs.Setup at all, and its manifest had no OTLP endpoint, so the one job that
+  decides whether there is anything to sell tomorrow reported nothing at all. A
+  CronJob is exactly the workload you cannot watch by eye; its pod is gone by the
+  time you wonder whether it ran. It also flushes explicitly on exit now, because
+  a job that lives two seconds loses nearly everything otherwise.
+
+  VERIFIED 2026-08-28 by taking a bank log line's trace_id and looking it up in
+  the traces table: it resolves to a trace rooted at simulator "session group",
+  running through the gateway into the bank. Logs and traces are joined by id
+  across three services, not by squinting at timestamps.
+
   RESOURCE ATTRIBUTES come from OTEL_RESOURCE_ATTRIBUTES in each Deployment, read
   by resource.WithFromEnv. Spans now carry deployment.environment.name=homelab and
   the emitting k8s.pod.name. The manifests build that string with downward-API
