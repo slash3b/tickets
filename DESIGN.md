@@ -911,13 +911,13 @@ MILESTONES
      API at api.tickets.lan, the simulator buying through it, and the DIVERGENCE
      CHECK AGREEING IN PRODUCTION: simulator bought 1, backend confirmed 1, sold 1.
 
-     SHAPE, stated plainly: catalog, inventory, orders and payments are PACKAGES
-     inside gateway and workers, not separate deployments. Every boundary is
-     already a consumer-declared interface so splitting them is wiring rather than
-     rework, and running two processes until there is a reason to run six avoids
-     paying for network hops that buy nothing yet. This is a deviation from the
-     seven-service picture above, deliberately, and it is written down rather than
-     quietly true.
+     SHAPE AT THE TIME: catalog, inventory, orders and payments were PACKAGES
+     inside gateway and workers, not separate deployments, on the reasoning that
+     running two processes until there is a reason to run six avoids paying for
+     network hops that buy nothing yet. SUPERSEDED 2026-08-28 - see milestone 7c.
+     The claim made here, that splitting would be wiring rather than rework
+     because every boundary was already a consumer-declared interface, turned out
+     to be true.
 
      workers holds every singleton - both sweepers, the reconciler, the resumer -
      with replicas 1 and strategy Recreate, so scaling the API cannot scale them
@@ -966,6 +966,45 @@ MILESTONES
      LOSING A RACE IS NOT AN ERROR SPAN. It is the expected outcome on a contended
      seat. Marking it failed would make a healthy on-sale look like an outage,
      which is the fastest way to make people stop trusting the traces.
+
+  7c THE SPLIT.                                               DONE 2026-08-28
+     catalog, inventory, orders and payments became their own deployments, and
+     the gateway became just a gateway - no database handle, no schema, no
+     stores, no credentials for Postgres at all.
+
+     IT REALLY WAS WIRING. The inventory and orders clients satisfy the gateway's
+     interfaces method for method, and the saga took network clients for its
+     Inventory and Payments dependencies without a line changing inside it. That
+     is the return on having declared those boundaries from the consumer side two
+     milestones earlier, and it is the strongest evidence in this project that
+     the practice pays.
+
+     EACH SERVICE OWNS EXACTLY ONE SCHEMA and is the only process that applies
+     it. "Inventory is the only writer of seat status" stopped being a rule people
+     have to remember and became a fact of the topology.
+
+     TRANSPORT IS gRPC, generated from proto/tickets/v1. The .proto files are now
+     the only definition of what crosses a boundary, rather than two hand-written
+     structs that agree until somebody renames a field. STATUS CODES ARE PART OF
+     THE CONTRACT: ABORTED is a lost race, which is a normal outcome and becomes a
+     409; FAILED_PRECONDITION is a hold that is already gone, which must never be
+     retried. A declined card is OK with OUTCOME_FAILED, not an error status - the
+     call worked, the answer was no.
+
+     WORKERS OWNS NO DATA. It is a ticker calling the service that owns each loop.
+     The loops must be singletons; the services they act on need not be, and
+     keeping the timer outside is what lets inventory scale when milestone 9 asks.
+
+     TWO BUGS, BOTH CAUGHT BY TESTS RATHER THAN BY THE CLUSTER. A lost race came
+     back as 500 because the gateway's ErrSeatsGone and inventory's sentinel are
+     different values and errors.Is compares identity - the adapter that joined
+     them was not ceremony. And the first test harness used a plain grpc.NewServer
+     instead of the production one, so nothing carried trace context and one
+     purchase became seven traces.
+
+     VERIFIED IN THE CLUSTER: one purchase, one trace, five services -
+     gateway -> orders -> inventory.Convert -> payments.Charge -> bank ->
+     inventory.Commit -> confirmed.
 
   8  arenas and concerts. Second venue kind, sections, a 20,000-seat chart, on_sale_at
      in the future for the first time.

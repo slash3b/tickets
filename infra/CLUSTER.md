@@ -811,7 +811,14 @@ ACCESS LAYER - GATEWAY API, MIGRATED 2026-08-27
 THE APPLICATION - DEPLOYED 2026-08-27
 -------------------------------------
 
-  ns tickets, Argo app `tickets`, wave 5.
+  ns tickets, Argo app `tickets`, wave 5. SPLIT INTO NINE SERVICES 2026-08-28;
+  before that, catalog/inventory/orders/payments were packages inside gateway and
+  workers. They speak gRPC on :9090, generated from proto/tickets/v1, and each
+  serves /livez and /readyz over HTTP on :8080 because kubelet probes speak HTTP.
+    catalog     what EXISTS             grpc only, no HTTPRoute
+    inventory   what is AVAILABLE       grpc only. THE CONTENDED CORE
+    orders      the saga                grpc only. calls inventory + payments
+    payments    whether money moved     grpc only. the only link to the bank
     gateway     the public API          https://api.tickets.lan
     workers     every singleton         replicas 1, strategy Recreate
     simulator   the load                https://sim.tickets.lan  (/stats, /config)
@@ -870,6 +877,11 @@ THE APPLICATION - DEPLOYED 2026-08-27
   reconciler and the order resumer. Nothing there is unsafe concurrently, but N
   replicas do N times the work on the same rows and multiply traffic to the bank.
   strategy: Recreate is deliberate - a rolling update would briefly run two.
+
+  THE GATEWAY HAS NO DATABASE CREDENTIALS. That is deliberate and worth not
+  undoing: it cannot reach Postgres at all, so the front door cannot read or write
+  a table even by mistake. Only catalog, inventory, orders and payments hold the
+  secret, one schema each.
 
   THE ONE MANUAL STEP: database credentials. CloudNativePG writes secret
   tickets-pg-app into ns data, and Kubernetes secrets do not cross namespaces, so
