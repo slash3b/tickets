@@ -2,39 +2,38 @@ package orders
 
 import (
 	"context"
-	"net/http"
-	"time"
 
 	"github.com/google/uuid"
+	"google.golang.org/grpc"
 
-	"github.com/slash3b/tickets/pkg/rpc"
+	pb "github.com/slash3b/tickets/gen/tickets/v1"
 )
 
-// Client talks to the orders service.
-type Client struct{ c *rpc.Client }
+type Client struct{ c pb.OrdersServiceClient }
 
-func NewClient(baseURL string, timeout time.Duration) *Client {
-	return &Client{c: rpc.New(baseURL, timeout)}
+func NewClient(cc grpc.ClientConnInterface) *Client {
+	return &Client{c: pb.NewOrdersServiceClient(cc)}
 }
 
 func (c *Client) Place(ctx context.Context, holdID, eventID, userID uuid.UUID, amountMinor int64) (uuid.UUID, error) {
-	var out placeResponse
-	err := c.c.Do(ctx, http.MethodPost, "/orders",
-		placeRequest{HoldID: holdID, EventID: eventID, UserID: userID, AmountMinor: amountMinor}, &out)
-	return out.OrderID, err
+	resp, err := c.c.Place(ctx, &pb.PlaceRequest{
+		HoldId:      holdID.String(),
+		EventId:     eventID.String(),
+		UserId:      userID.String(),
+		AmountMinor: amountMinor,
+	})
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return uuid.Parse(resp.GetOrderId())
 }
 
 func (c *Client) Status(ctx context.Context, orderID uuid.UUID) (string, error) {
-	var out placeResponse
-	err := c.c.Do(ctx, http.MethodGet, "/orders/"+orderID.String(), nil, &out)
-	return out.State, err
+	resp, err := c.c.GetOrder(ctx, &pb.GetOrderRequest{OrderId: orderID.String()})
+	return resp.GetState(), err
 }
 
-// Resume runs one resumer pass. Driven by workers.
 func (c *Client) Resume(ctx context.Context) (int, error) {
-	var out struct {
-		Resumed int `json:"resumed"`
-	}
-	err := c.c.Do(ctx, http.MethodPost, "/internal/resume", nil, &out)
-	return out.Resumed, err
+	resp, err := c.c.Resume(ctx, &pb.ResumeRequest{})
+	return int(resp.GetResumed()), err
 }

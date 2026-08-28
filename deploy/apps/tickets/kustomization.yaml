@@ -3,12 +3,24 @@ kind: Kustomization
 namespace: tickets
 resources:
 - namespace.yaml
+- catalog.yaml
+- inventory.yaml
+- orders.yaml
+- payments.yaml
 - gateway.yaml
 - workers.yaml
 - simulator.yaml
 - seeder.yaml
 - web.yaml
 images:
+- name: ghcr.io/slash3b/tickets-catalog
+  newTag: latest
+- name: ghcr.io/slash3b/tickets-inventory
+  newTag: latest
+- name: ghcr.io/slash3b/tickets-orders
+  newTag: latest
+- name: ghcr.io/slash3b/tickets-payments
+  newTag: latest
 - name: ghcr.io/slash3b/tickets-gateway
   newTag: 9f3c31a70de8cd49b46b89cf2b0b72e05a6de5e8
 - name: ghcr.io/slash3b/tickets-seeder

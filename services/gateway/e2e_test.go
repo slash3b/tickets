@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -24,20 +25,27 @@ import (
 	"github.com/slash3b/tickets/services/payments/bankclient"
 	paystore "github.com/slash3b/tickets/services/payments/store"
 
+	"github.com/slash3b/tickets/pkg/grpcx"
 	"github.com/slash3b/tickets/pkg/obs"
 
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/test/bufconn"
+
+	pb "github.com/slash3b/tickets/gen/tickets/v1"
 )
 
-// buildSystem stands up the WHOLE SYSTEM over real HTTP: catalog, inventory,
-// payments and orders each as their own server, the fake bank behind payments,
-// and the gateway calling all of them as clients.
+// buildSystem stands up the WHOLE SYSTEM over real gRPC: catalog, inventory,
+// payments and orders each as their own server on an in-memory listener, the
+// fake bank behind payments, and the gateway calling all of them as clients.
 //
-// It deliberately does NOT wire the stores together in-process any more. Before
-// the split that was the same thing; it is not any more, and the difference is
-// exactly where this system can now break. A lost race has to come back as a 409
-// with a code that the inventory client turns back into ErrSeatsUnavailable, and
-// a test that skipped the network would prove nothing about that.
+// bufconn rather than real ports: it is a genuine gRPC connection — the same
+// codecs, interceptors and status codes — without binding anything or racing on
+// port numbers. What it does NOT simulate is the network itself, which is fine,
+// because what these tests are about is whether a status code survives the hop
+// and turns back into the sentinel a Go caller switches on.
 func buildSystem(t *testing.T, bankCfg bank.Config) (*httptest.Server, *catalogstore.Store, *inventorystore.Store, *pgxpool.Pool) {
 	t.Helper()
 
@@ -71,8 +79,7 @@ func buildSystem(t *testing.T, bankCfg bank.Config) (*httptest.Server, *catalogs
 		}
 	}
 
-	// Silent loggers: the access logs are not what these tests assert, and five
-	// services' worth of them would bury the failure message.
+	// Silent loggers: five services' worth of access logs would bury the failure.
 	nop := zap.NewNop()
 
 	cat := catalogstore.New(pool)
@@ -84,28 +91,30 @@ func buildSystem(t *testing.T, bankCfg bank.Config) (*httptest.Server, *catalogs
 	t.Cleanup(bankSrv.Close)
 	bankCli := bankclient.New(bankSrv.URL, 2*time.Second)
 
-	catSrv := httptest.NewServer(catalog.New(cat, nop).Handler())
-	t.Cleanup(catSrv.Close)
-
-	invSrv := httptest.NewServer(inventory.New(inv, nop).Handler())
-	t.Cleanup(invSrv.Close)
-
-	paySrv := httptest.NewServer(payments.New(
-		pay, bankCli, paystore.NewReconciler(pay, bankCli, time.Minute), nop).Handler())
-	t.Cleanup(paySrv.Close)
+	catConn := serveGRPC(t, nop, func(s *grpc.Server) {
+		pb.RegisterCatalogServiceServer(s, catalog.NewServer(cat))
+	})
+	invConn := serveGRPC(t, nop, func(s *grpc.Server) {
+		pb.RegisterInventoryServiceServer(s, inventory.NewServer(inv, nop))
+	})
+	payConn := serveGRPC(t, nop, func(s *grpc.Server) {
+		pb.RegisterPaymentsServiceServer(s, payments.NewServer(
+			pay, bankCli, paystore.NewReconciler(pay, bankCli, time.Minute), nop))
+	})
 
 	// Orders talks to inventory and payments as clients, exactly as in the cluster.
-	invCli := inventory.NewClient(invSrv.URL, 5*time.Second)
-	payCli := payments.NewClient(paySrv.URL, 15*time.Second)
-	saga := ordersstore.NewSaga(ord, invCli, orders.PaymentsAdapter{C: payCli})
-	ordSrv := httptest.NewServer(orders.New(
-		ord, saga, ordersstore.NewResumer(saga, ord, time.Minute), nop).Handler())
-	t.Cleanup(ordSrv.Close)
+	invCli := inventory.NewClient(invConn)
+	saga := ordersstore.NewSaga(ord, invCli,
+		orders.PaymentsAdapter{C: payments.NewClient(payConn)})
+	ordConn := serveGRPC(t, nop, func(s *grpc.Server) {
+		pb.RegisterOrdersServiceServer(s, orders.NewServer(
+			ord, saga, ordersstore.NewResumer(saga, ord, time.Minute), nop))
+	})
 
 	api := New(
-		CatalogClient{C: catalog.NewClient(catSrv.URL, 5*time.Second)},
+		CatalogClient{C: catalog.NewClient(catConn)},
 		InventoryClient{C: invCli},
-		orders.NewClient(ordSrv.URL, 20*time.Second),
+		orders.NewClient(ordConn),
 		5*time.Minute,
 		nop,
 	)
@@ -113,6 +122,38 @@ func buildSystem(t *testing.T, bankCfg bank.Config) (*httptest.Server, *catalogs
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)
 	return srv, cat, inv, pool
+}
+
+// serveGRPC runs one service on an in-memory listener and returns a connection.
+//
+// IT MUST USE THE SAME SERVER AND THE SAME HANDLERS AS PRODUCTION. The first
+// version here called plain grpc.NewServer, and TestPurchaseIsTraced failed
+// immediately: without otelgrpc on both ends nothing carries the trace context,
+// so every hop started its own trace and one purchase became seven. That is a
+// real failure mode — it is what a distributed system looks like when tracing is
+// wired on one side only — and a harness that skipped it would have let the same
+// mistake reach the cluster unnoticed.
+func serveGRPC(t *testing.T, lg *zap.Logger, register func(*grpc.Server)) *grpc.ClientConn {
+	t.Helper()
+
+	lis := bufconn.Listen(1024 * 1024)
+	srv := grpcx.NewServer(lg)
+	register(srv)
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+
+	conn, err := grpc.NewClient("passthrough:///bufnet",
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+			return lis.DialContext(ctx)
+		}),
+	)
+	if err != nil {
+		t.Fatalf("dial bufconn: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	return conn
 }
 
 // seedShowing creates a cinema, an event on sale now, and opens its seats.

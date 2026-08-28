@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 
+	pb "github.com/slash3b/tickets/gen/tickets/v1"
 	"github.com/slash3b/tickets/services/orders/store"
 	"github.com/slash3b/tickets/services/payments"
 )
@@ -35,9 +36,9 @@ func (p PaymentsAdapter) Charge(ctx context.Context, orderID uuid.UUID, amountMi
 	}
 
 	switch outcome {
-	case "succeeded":
+	case pb.Outcome_OUTCOME_SUCCEEDED:
 		return store.PaymentSucceeded, "", nil
-	case "failed":
+	case pb.Outcome_OUTCOME_FAILED:
 		return store.PaymentFailed, declineCode, nil
 	default:
 		return store.PaymentUnknown, "", nil

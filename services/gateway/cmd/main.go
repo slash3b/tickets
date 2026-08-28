@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/slash3b/tickets/pkg/env"
+	"github.com/slash3b/tickets/pkg/grpcx"
 	"github.com/slash3b/tickets/pkg/health"
 	"github.com/slash3b/tickets/pkg/logger"
 	"github.com/slash3b/tickets/pkg/obs"
@@ -45,13 +46,13 @@ func main() {
 
 func run() error {
 	var (
-		port         = env.Get("PORT", "8080")
-		debug        = env.Get("DEBUG", "false") == "true"
-		otlp         = env.Get("OTEL_EXPORTER_OTLP_ENDPOINT", "")
-		catalogURL   = env.Get("CATALOG_URL", "http://catalog.tickets.svc.cluster.local")
-		inventoryURL = env.Get("INVENTORY_URL", "http://inventory.tickets.svc.cluster.local")
-		ordersURL    = env.Get("ORDERS_URL", "http://orders.tickets.svc.cluster.local")
-		holdTTL      = envDuration("HOLD_TTL", 5*time.Minute)
+		port          = env.Get("PORT", "8080")
+		debug         = env.Get("DEBUG", "false") == "true"
+		otlp          = env.Get("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+		catalogAddr   = env.Get("CATALOG_ADDR", "catalog.tickets.svc.cluster.local:9090")
+		inventoryAddr = env.Get("INVENTORY_ADDR", "inventory.tickets.svc.cluster.local:9090")
+		ordersAddr    = env.Get("ORDERS_ADDR", "orders.tickets.svc.cluster.local:9090")
+		holdTTL       = envDuration("HOLD_TTL", 5*time.Minute)
 	)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -64,13 +65,31 @@ func run() error {
 	lg, flush := logger.MustNew(service, debug, logProvider)
 	defer func() { _ = flush() }()
 
-	// Placing an order is the slow one: it fans out to inventory, payments and
-	// the bank behind them. Reads get a short timeout because a slow seat map is
-	// worse than no seat map — the browser is polling and will ask again.
+	// grpcx.Dial does not block, so the gateway boots whether or not its peers
+	// are up yet. A front door that refuses to start because a dependency is
+	// briefly down makes a cluster restart ordering-dependent.
+	catConn, err := grpcx.Dial(catalogAddr)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = catConn.Close() }()
+
+	invConn, err := grpcx.Dial(inventoryAddr)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = invConn.Close() }()
+
+	ordConn, err := grpcx.Dial(ordersAddr)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = ordConn.Close() }()
+
 	api := gateway.New(
-		gateway.CatalogClient{C: catalog.NewClient(catalogURL, 3*time.Second)},
-		gateway.InventoryClient{C: inventory.NewClient(inventoryURL, 5*time.Second)},
-		orders.NewClient(ordersURL, 20*time.Second),
+		gateway.CatalogClient{C: catalog.NewClient(catConn)},
+		gateway.InventoryClient{C: inventory.NewClient(invConn)},
+		orders.NewClient(ordConn),
 		holdTTL,
 		lg,
 	)
@@ -92,9 +111,9 @@ func run() error {
 	go func() {
 		lg.Info("listening",
 			zap.String("addr", srv.Addr),
-			zap.String("catalog", catalogURL),
-			zap.String("inventory", inventoryURL),
-			zap.String("orders", ordersURL))
+			zap.String("catalog", catalogAddr),
+			zap.String("inventory", inventoryAddr),
+			zap.String("orders", ordersAddr))
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errc <- err
 		}

@@ -56,11 +56,12 @@ spec:
               # environment and the emitting pod on every span, without a line of
               # Go anywhere knowing that Kubernetes exists.
               value: "deployment.environment.name=homelab,k8s.cluster.name=homelab,k8s.pod.name=$(POD_NAME),k8s.namespace.name=$(POD_NAMESPACE),k8s.node.name=$(NODE_NAME)"
-            - {name: BANK_URL, value: "http://bank.bank.svc.cluster.local"}
+            # It owns no data now: it is a ticker that calls the service which
+            # owns each loop.
+            - {name: INVENTORY_ADDR, value: "inventory.tickets.svc.cluster.local:9090"}
+            - {name: ORDERS_ADDR,    value: "orders.tickets.svc.cluster.local:9090"}
+            - {name: PAYMENTS_ADDR,  value: "payments.tickets.svc.cluster.local:9090"}
             - {name: SWEEP_INTERVAL, value: "30s"}
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef: {name: tickets-pg-app, key: uri}
           resources:
             requests: {cpu: 25m, memory: 48Mi}
             limits:   {memory: 128Mi}

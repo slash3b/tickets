@@ -44,14 +44,12 @@ spec:
               # environment and the emitting pod on every span, without a line of
               # Go anywhere knowing that Kubernetes exists.
               value: "deployment.environment.name=homelab,k8s.cluster.name=homelab,k8s.pod.name=$(POD_NAME),k8s.namespace.name=$(POD_NAMESPACE),k8s.node.name=$(NODE_NAME)"
-            - {name: BANK_URL, value: "http://bank.bank.svc.cluster.local"}
             - {name: HOLD_TTL, value: "5m"}
-            # Credentials come from the secret CloudNativePG generated. They are
-            # never in git — see the README note about copying it into this
-            # namespace, which is the one manual step here.
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef: {name: tickets-pg-app, key: uri}
+            # It calls three services and owns no data. There is deliberately no
+            # DATABASE_URL here any more: the gateway cannot reach Postgres at all.
+            - {name: CATALOG_ADDR,   value: "catalog.tickets.svc.cluster.local:9090"}
+            - {name: INVENTORY_ADDR, value: "inventory.tickets.svc.cluster.local:9090"}
+            - {name: ORDERS_ADDR,    value: "orders.tickets.svc.cluster.local:9090"}
           resources:
             requests: {cpu: 25m, memory: 48Mi}
             limits:   {memory: 128Mi}
@@ -63,8 +61,10 @@ spec:
             httpGet: {path: /livez, port: http}
             periodSeconds: 10
           readinessProbe:
-            # Readiness pings the database, so a gateway that cannot reach
-            # Postgres leaves the rotation instead of serving 500s.
+            # Readiness checks NOTHING downstream, deliberately. It is tempting
+            # to fail this when catalog is unreachable; do not. That takes the
+            # whole front door out of rotation because one dependency is unwell,
+            # turning a partial outage into a total one.
             httpGet: {path: /readyz, port: http}
             periodSeconds: 5
 ---

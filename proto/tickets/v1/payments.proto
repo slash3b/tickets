@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package tickets.v1;
+
+option go_package = "github.com/slash3b/tickets/gen/tickets/v1;ticketsv1";
+
+// Payments owns whether money moved. It holds the only connection to the bank.
+service PaymentsService {
+  rpc Charge(ChargeRequest) returns (ChargeResponse);
+  rpc GetCharge(GetChargeRequest) returns (GetChargeResponse);
+
+  // Driven by workers on a ticker.
+  rpc Reconcile(ReconcileRequest) returns (ReconcileResponse);
+}
+
+// THREE OUTCOMES, NOT TWO. UNKNOWN is first class: the bank took the request and
+// never answered, so money may or may not have moved. It is emphatically not
+// FAILED, and an unknown payment must not release the seats — that is exactly how
+// a paying customer loses them to someone else.
+enum Outcome {
+  OUTCOME_UNSPECIFIED = 0;
+  OUTCOME_SUCCEEDED = 1;
+  OUTCOME_FAILED = 2;
+  OUTCOME_UNKNOWN = 3;
+}
+
+message ChargeRequest {
+  string order_id = 1;
+  int64 amount_minor = 2;
+}
+
+// A declined card returns OK with OUTCOME_FAILED, not an error status. The call
+// worked; the answer was no. Encoding a business outcome as a transport failure
+// is how retry logic ends up retrying decisions made correctly the first time.
+message ChargeResponse {
+  Outcome outcome = 1;
+  string decline_code = 2;
+}
+
+message GetChargeRequest { string order_id = 1; }
+message GetChargeResponse {
+  string order_id = 1;
+  string state = 2;
+  int64 amount_minor = 3;
+}
+
+message ReconcileRequest {}
+message ReconcileResponse { int32 resolved = 1; }

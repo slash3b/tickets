@@ -1,14 +1,11 @@
 // The inventory service: what is AVAILABLE.
 //
-// The contended core. Every seat claim in the system happens here, in one
-// conditional UPDATE, and this is the only process with credentials for the
-// inventory schema — so "inventory is the only writer of seat status" stopped
-// being a rule people had to remember and became a fact of the topology.
+// The contended core. Every seat claim happens here, in one conditional UPDATE,
+// and this is the only process with credentials for the inventory schema.
 //
-// It also serves /internal/sweep, which workers drives on a ticker. The sweep is
-// deliberately NOT a loop inside this process: keeping it out means this service
-// can run more than one replica when the seat-claim path needs it, which is
-// exactly what milestone 9 will ask for.
+// The sweep is NOT a loop in here — workers calls Sweep on a ticker. Keeping the
+// singleton outside is what lets this service run more than one replica when the
+// seat-claim path needs it.
 package main
 
 import (
@@ -22,10 +19,13 @@ import (
 	"time"
 
 	"github.com/slash3b/tickets/pkg/env"
+	"github.com/slash3b/tickets/pkg/grpcx"
 	"github.com/slash3b/tickets/pkg/health"
 	"github.com/slash3b/tickets/pkg/logger"
 	"github.com/slash3b/tickets/pkg/migrate"
 	"github.com/slash3b/tickets/pkg/obs"
+
+	pb "github.com/slash3b/tickets/gen/tickets/v1"
 	"github.com/slash3b/tickets/services/inventory"
 	"github.com/slash3b/tickets/services/inventory/store"
 
@@ -46,11 +46,14 @@ func main() {
 
 func run() error {
 	var (
-		port  = env.Get("PORT", "8080")
-		debug = env.Get("DEBUG", "false") == "true"
-		otlp  = env.Get("OTEL_EXPORTER_OTLP_ENDPOINT", "")
-		dsn   = env.Get("DATABASE_URL", "")
+		httpPort = env.Get("PORT", "8080")
+		grpcPort = env.Get("GRPC_PORT", "9090")
+		debug    = env.Get("DEBUG", "false") == "true"
+		otlp     = env.Get("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+		dsn      = env.Get("DATABASE_URL", "")
+		bankURL  = env.Get("BANK_URL", "http://bank.bank.svc.cluster.local")
 	)
+	_ = bankURL
 	if dsn == "" {
 		return errors.New("DATABASE_URL is required")
 	}
@@ -71,36 +74,53 @@ func run() error {
 	}
 	defer pool.Close()
 
-	// Only its own schema — see the note in the catalog service.
+	// ONLY ITS OWN SCHEMA. Before the split one process applied all four, which
+	// worked and quietly meant every service could see every table.
 	if err := migrate.Apply(ctx, pool, store.SchemaSQL); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
 	}
 
-	api := inventory.New(store.New(pool), lg)
+	grpcSrv := grpcx.NewServer(lg)
+	pb.RegisterInventoryServiceServer(grpcSrv, inventory.NewServer(store.New(pool), lg))
 
+	// TWO LISTENERS, DELIBERATELY. gRPC serves the peers; a tiny HTTP server
+	// serves /livez and /readyz, because kubelet probes speak HTTP and wiring
+	// grpc-health-probe into every image buys nothing here.
 	mux := http.NewServeMux()
-	mux.Handle("/", api.Handler())
 	health.New(lg).Register(ctx, mux, 3*time.Second, 15*time.Second,
 		func(ctx context.Context) error { return pool.Ping(ctx) })
+	httpSrv := &http.Server{Addr: ":" + httpPort, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 
-	srv := &http.Server{Addr: ":" + port, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	lis, err := grpcx.Listen(grpcPort)
+	if err != nil {
+		return err
+	}
 
-	errc := make(chan error, 1)
+	errc := make(chan error, 2)
 	go func() {
-		lg.Info("listening", zap.String("addr", srv.Addr))
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errc <- err
+		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errc <- fmt.Errorf("health server: %w", err)
+		}
+	}()
+	go func() {
+		lg.Info("serving grpc", zap.String("addr", lis.Addr().String()),
+			zap.String("health", httpSrv.Addr))
+		if err := grpcSrv.Serve(lis); err != nil {
+			errc <- fmt.Errorf("grpc: %w", err)
 		}
 	}()
 
 	select {
 	case err := <-errc:
-		return fmt.Errorf("serve: %w", err)
+		return err
 	case <-ctx.Done():
 		lg.Info("shutting down")
 	}
 
+	// GracefulStop lets in-flight calls finish. A saga step cut off mid-charge is
+	// exactly the ambiguity this system spends its time avoiding.
+	grpcSrv.GracefulStop()
 	drain, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	return errors.Join(srv.Shutdown(drain), shutdownObs(drain))
+	return errors.Join(httpSrv.Shutdown(drain), shutdownObs(drain))
 }

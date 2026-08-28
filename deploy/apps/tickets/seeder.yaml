@@ -31,9 +31,8 @@ spec:
             - name: seeder
               image: ghcr.io/slash3b/tickets-seeder:latest   # CI rewrites this
               env:
-                - name: DATABASE_URL
-                  valueFrom:
-                    secretKeyRef: {name: tickets-pg-app, key: uri}
+                - {name: CATALOG_ADDR,   value: "catalog.tickets.svc.cluster.local:9090"}
+                - {name: INVENTORY_ADDR, value: "inventory.tickets.svc.cluster.local:9090"}
                 # A CronJob is the one workload you cannot watch by eye — its pod
                 # is gone by the time you wonder whether it ran. It reports like
                 # everything else now.

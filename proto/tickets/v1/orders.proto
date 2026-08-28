@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package tickets.v1;
+
+option go_package = "github.com/slash3b/tickets/gen/tickets/v1;ticketsv1";
+
+// Orders owns the saga. It is the only service that calls two others: placing an
+// order converts a hold in Inventory, charges in Payments, and commits the seats
+// back in Inventory.
+service OrdersService {
+  rpc Place(PlaceRequest) returns (PlaceResponse);
+  rpc GetOrder(GetOrderRequest) returns (GetOrderResponse);
+
+  // Driven by workers on a ticker.
+  rpc Resume(ResumeRequest) returns (ResumeResponse);
+}
+
+message PlaceRequest {
+  string hold_id = 1;
+  string event_id = 2;
+  string user_id = 3;
+  int64 amount_minor = 4;
+}
+
+// State is a string, not an enum, on purpose: it is the order state machine's own
+// vocabulary and it is written to the database as text. An enum here would mean
+// two definitions of the same set that can drift apart silently.
+message PlaceResponse {
+  string order_id = 1;
+  string state = 2;
+}
+
+message GetOrderRequest { string order_id = 1; }
+message GetOrderResponse {
+  string order_id = 1;
+  string state = 2;
+}
+
+message ResumeRequest {}
+message ResumeResponse { int32 resumed = 1; }

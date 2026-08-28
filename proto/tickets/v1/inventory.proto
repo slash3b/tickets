@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+package tickets.v1;
+
+import "google/protobuf/duration.proto";
+
+option go_package = "github.com/slash3b/tickets/gen/tickets/v1;ticketsv1";
+
+// Inventory owns what is AVAILABLE. It is the only writer of seat status in the
+// system, which since the split is enforced by topology: nothing else has
+// credentials for the inventory schema.
+//
+// ERRORS ARE gRPC STATUS CODES AND THEY ARE PART OF THE CONTRACT:
+//
+//   ABORTED             the seats were taken by someone else. A NORMAL outcome,
+//                       the most common non-OK in the system, and the gateway
+//                       turns it into 409. Aborted is the documented code for a
+//                       concurrency conflict, which is exactly what this is.
+//   FAILED_PRECONDITION the hold was already released, so the seats are gone for
+//                       good. The saga must not retry this one — retrying can
+//                       never succeed.
+//
+// Anything else is a genuine fault and may be retried.
+service InventoryService {
+  rpc Hold(HoldRequest) returns (HoldResponse);
+  rpc Release(ReleaseRequest) returns (ReleaseResponse);
+  rpc Convert(ConvertRequest) returns (ConvertResponse);
+  rpc Commit(CommitRequest) returns (CommitResponse);
+  rpc OpenEvent(OpenEventRequest) returns (OpenEventResponse);
+  rpc SeatStatuses(SeatStatusesRequest) returns (SeatStatusesResponse);
+
+  // Driven by workers on a ticker, never by a request path.
+  rpc Sweep(SweepRequest) returns (SweepResponse);
+}
+
+message HoldRequest {
+  string event_id = 1;
+  repeated string seat_ids = 2;
+  google.protobuf.Duration ttl = 3;
+}
+message HoldResponse { string hold_id = 1; }
+
+message ReleaseRequest {
+  string hold_id = 1;
+  string reason = 2;
+}
+message ReleaseResponse {}
+
+message ConvertRequest { string hold_id = 1; }
+message ConvertResponse {}
+
+message CommitRequest { string hold_id = 1; }
+message CommitResponse {}
+
+message OpenEventRequest {
+  string event_id = 1;
+  repeated string seat_ids = 2;
+}
+message OpenEventResponse { int32 opened = 1; }
+
+message SeatStatusesRequest {
+  string event_id = 1;
+  repeated string seat_ids = 2;
+}
+message SeatStatusesResponse {
+  // seat id -> available | held | sold
+  map<string, string> statuses = 1;
+}
+
+message SweepRequest {}
+message SweepResponse {
+  int32 expired = 1;
+  // Holds reclaimed on their HARD deadline rather than their TTL. Non-zero means
+  // something was stuck in `converting` — a bug signal, not routine cleanup.
+  int32 hard_deadline = 2;
+}

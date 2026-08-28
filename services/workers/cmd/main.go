@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/slash3b/tickets/pkg/env"
+	"github.com/slash3b/tickets/pkg/grpcx"
 	"github.com/slash3b/tickets/pkg/health"
 	"github.com/slash3b/tickets/pkg/logger"
 	"github.com/slash3b/tickets/pkg/obs"
@@ -33,6 +34,7 @@ import (
 	"github.com/slash3b/tickets/services/payments"
 
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 const (
@@ -49,13 +51,13 @@ func main() {
 
 func run() error {
 	var (
-		port         = env.Get("PORT", "8080")
-		debug        = env.Get("DEBUG", "false") == "true"
-		otlp         = env.Get("OTEL_EXPORTER_OTLP_ENDPOINT", "")
-		inventoryURL = env.Get("INVENTORY_URL", "http://inventory.tickets.svc.cluster.local")
-		ordersURL    = env.Get("ORDERS_URL", "http://orders.tickets.svc.cluster.local")
-		paymentsURL  = env.Get("PAYMENTS_URL", "http://payments.tickets.svc.cluster.local")
-		every        = envDuration("SWEEP_INTERVAL", 30*time.Second)
+		port          = env.Get("PORT", "8080")
+		debug         = env.Get("DEBUG", "false") == "true"
+		otlp          = env.Get("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+		inventoryAddr = env.Get("INVENTORY_ADDR", "inventory.tickets.svc.cluster.local:9090")
+		ordersAddr    = env.Get("ORDERS_ADDR", "orders.tickets.svc.cluster.local:9090")
+		paymentsAddr  = env.Get("PAYMENTS_ADDR", "payments.tickets.svc.cluster.local:9090")
+		every         = envDuration("SWEEP_INTERVAL", 30*time.Second)
 	)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -68,12 +70,21 @@ func run() error {
 	lg, flush := logger.MustNew(service, debug, logProvider)
 	defer func() { _ = flush() }()
 
-	// Generous timeouts: a pass that takes a while is fine, it runs on a ticker
-	// and nobody is waiting. Reconcile is longest because it may talk to a bank
-	// that is deliberately slow.
-	inv := inventory.NewClient(inventoryURL, 30*time.Second)
-	ord := orders.NewClient(ordersURL, 60*time.Second)
-	pay := payments.NewClient(paymentsURL, 60*time.Second)
+	conns := map[string]*grpc.ClientConn{}
+	for name, addr := range map[string]string{
+		"inventory": inventoryAddr, "orders": ordersAddr, "payments": paymentsAddr,
+	} {
+		conn, err := grpcx.Dial(addr)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = conn.Close() }()
+		conns[name] = conn
+	}
+
+	inv := inventory.NewClient(conns["inventory"])
+	ord := orders.NewClient(conns["orders"])
+	pay := payments.NewClient(conns["payments"])
 
 	go loop(ctx, lg, "sweep", every, func(ctx context.Context) (string, error) {
 		expired, hard, err := inv.Sweep(ctx)
@@ -102,8 +113,8 @@ func run() error {
 	errc := make(chan error, 1)
 	go func() {
 		lg.Info("running", zap.String("addr", srv.Addr), zap.Duration("every", every),
-			zap.String("inventory", inventoryURL), zap.String("orders", ordersURL),
-			zap.String("payments", paymentsURL))
+			zap.String("inventory", inventoryAddr), zap.String("orders", ordersAddr),
+			zap.String("payments", paymentsAddr))
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errc <- err
 		}
@@ -133,7 +144,11 @@ func loop(ctx context.Context, lg *zap.Logger, name string, every time.Duration,
 	defer t.Stop()
 
 	for {
-		result, err := once(ctx)
+		// A gRPC connection carries no deadline of its own; each pass gets one.
+		// Without this a wedged peer would stall the ticker forever.
+		passCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+		result, err := once(passCtx)
+		cancel()
 		switch {
 		case err != nil && ctx.Err() == nil:
 			lg.Error(name+" failed", zap.Error(err))

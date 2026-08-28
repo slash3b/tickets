@@ -21,6 +21,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/slash3b/tickets/pkg/env"
+	"github.com/slash3b/tickets/pkg/grpcx"
 	"github.com/slash3b/tickets/pkg/logger"
 	"github.com/slash3b/tickets/pkg/obs"
 	"github.com/slash3b/tickets/services/catalog"
@@ -56,10 +57,10 @@ func main() {
 
 func run() error {
 	var (
-		debug        = env.Get("DEBUG", "false") == "true"
-		otlp         = env.Get("OTEL_EXPORTER_OTLP_ENDPOINT", "")
-		catalogURL   = env.Get("CATALOG_URL", "http://catalog.tickets.svc.cluster.local")
-		inventoryURL = env.Get("INVENTORY_URL", "http://inventory.tickets.svc.cluster.local")
+		debug         = env.Get("DEBUG", "false") == "true"
+		otlp          = env.Get("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+		catalogAddr   = env.Get("CATALOG_ADDR", "catalog.tickets.svc.cluster.local:9090")
+		inventoryAddr = env.Get("INVENTORY_ADDR", "inventory.tickets.svc.cluster.local:9090")
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -84,8 +85,20 @@ func run() error {
 	ctx, span := otel.Tracer(service).Start(ctx, "seed")
 	defer span.End()
 
-	cat := catalog.NewClient(catalogURL, 15*time.Second)
-	inv := inventory.NewClient(inventoryURL, 30*time.Second)
+	catConn, err := grpcx.Dial(catalogAddr)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = catConn.Close() }()
+
+	invConn, err := grpcx.Dial(inventoryAddr)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = invConn.Close() }()
+
+	cat := catalog.NewClient(catConn)
+	inv := inventory.NewClient(invConn)
 
 	// Tomorrow evening, on sale now.
 	//
@@ -117,24 +130,29 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("create event: %w", err)
 	}
-	if err := cat.SetPrice(ctx, event.ID, sectionID, 1200); err != nil {
+	if err := cat.SetPrice(ctx, mustID(event.GetId()), sectionID, 1200); err != nil {
 		return fmt.Errorf("set price: %w", err)
 	}
 
 	// Catalog says which seats exist; INVENTORY opens them. Even here, inventory
 	// stays the only writer of seat status.
-	seatIDs, err := cat.SeatIDsForEvent(ctx, event.ID)
+	eventID, err := uuid.Parse(event.GetId())
+	if err != nil {
+		return fmt.Errorf("event id: %w", err)
+	}
+
+	seatIDs, err := cat.SeatIDsForEvent(ctx, eventID)
 	if err != nil {
 		return fmt.Errorf("list seats: %w", err)
 	}
-	opened, err := inv.OpenEvent(ctx, event.ID, seatIDs)
+	opened, err := inv.OpenEvent(ctx, eventID, seatIDs)
 	if err != nil {
 		return fmt.Errorf("open event: %w", err)
 	}
 
 	lg.Info("showing created",
 		zap.String("title", title),
-		zap.String("event_id", event.ID.String()),
+		zap.String("event_id", event.GetId()),
 		zap.Time("starts_at", startsAt),
 		zap.Int("seats_opened", opened))
 	return nil
@@ -167,4 +185,14 @@ func venue(ctx context.Context, cat *catalog.Client, lg *zap.Logger) (venueID, s
 		return uuid.Nil, uuid.Nil, fmt.Errorf("first section: %w", err)
 	}
 	return venueID, sectionID, nil
+}
+
+// mustID parses an id the catalog just produced. A catalog that returns an
+// unparseable uuid is broken in a way retrying will not fix.
+func mustID(s string) uuid.UUID {
+	id, err := uuid.Parse(s)
+	if err != nil {
+		panic(fmt.Sprintf("catalog returned a malformed uuid %q: %v", s, err))
+	}
+	return id
 }

@@ -2,9 +2,7 @@
 //
 // The only service that calls two others. Placing an order converts a hold in
 // inventory, charges in payments, and commits the seats back in inventory —
-// three network calls that can each fail independently.
-//
-// It owns the orders schema and serves /internal/resume, which workers drives.
+// three calls that can each fail independently.
 package main
 
 import (
@@ -18,10 +16,13 @@ import (
 	"time"
 
 	"github.com/slash3b/tickets/pkg/env"
+	"github.com/slash3b/tickets/pkg/grpcx"
 	"github.com/slash3b/tickets/pkg/health"
 	"github.com/slash3b/tickets/pkg/logger"
 	"github.com/slash3b/tickets/pkg/migrate"
 	"github.com/slash3b/tickets/pkg/obs"
+
+	pb "github.com/slash3b/tickets/gen/tickets/v1"
 	"github.com/slash3b/tickets/services/inventory"
 	"github.com/slash3b/tickets/services/orders"
 	"github.com/slash3b/tickets/services/orders/store"
@@ -44,12 +45,11 @@ func main() {
 
 func run() error {
 	var (
-		port         = env.Get("PORT", "8080")
-		debug        = env.Get("DEBUG", "false") == "true"
-		otlp         = env.Get("OTEL_EXPORTER_OTLP_ENDPOINT", "")
-		dsn          = env.Get("DATABASE_URL", "")
-		inventoryURL = env.Get("INVENTORY_URL", "http://inventory.tickets.svc.cluster.local")
-		paymentsURL  = env.Get("PAYMENTS_URL", "http://payments.tickets.svc.cluster.local")
+		httpPort = env.Get("PORT", "8080")
+		grpcPort = env.Get("GRPC_PORT", "9090")
+		debug    = env.Get("DEBUG", "false") == "true"
+		otlp     = env.Get("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+		dsn      = env.Get("DATABASE_URL", "")
 	)
 	if dsn == "" {
 		return errors.New("DATABASE_URL is required")
@@ -71,50 +71,73 @@ func run() error {
 	}
 	defer pool.Close()
 
+	// ONLY ITS OWN SCHEMA. Before the split one process applied all four, which
+	// worked and quietly meant every service could see every table.
 	if err := migrate.Apply(ctx, pool, store.SchemaSQL); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
 	}
 
-	// The saga's two dependencies are now network clients. Its code did not
-	// change: both were already consumer-declared interfaces, and these satisfy
-	// them. That is the whole return on having written it that way.
-	//
-	// The payments timeout is longer than inventory's because the bank is on the
-	// far side of it and is deliberately slow. Cutting it short would turn a slow
-	// answer into an unknown one, which is strictly worse.
-	inv := inventory.NewClient(inventoryURL, 5*time.Second)
-	pay := orders.PaymentsAdapter{C: payments.NewClient(paymentsURL, 15*time.Second)}
+	// The saga's two dependencies are now gRPC clients. Its code did not change:
+	// both were already consumer-declared interfaces and these satisfy them. That
+	// is the whole return on having written it that way.
+	invConn, err := grpcx.Dial(env.Get("INVENTORY_ADDR", "inventory.tickets.svc.cluster.local:9090"))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = invConn.Close() }()
+
+	payConn, err := grpcx.Dial(env.Get("PAYMENTS_ADDR", "payments.tickets.svc.cluster.local:9090"))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = payConn.Close() }()
 
 	ord := store.New(pool)
-	saga := store.NewSaga(ord, inv, pay)
-	res := store.NewResumer(saga, ord, time.Minute)
+	saga := store.NewSaga(ord, inventory.NewClient(invConn),
+		orders.PaymentsAdapter{C: payments.NewClient(payConn)})
 
-	api := orders.New(ord, saga, res, lg)
+	grpcSrv := grpcx.NewServer(lg)
+	pb.RegisterOrdersServiceServer(grpcSrv,
+		orders.NewServer(ord, saga, store.NewResumer(saga, ord, time.Minute), lg))
 
+	// TWO LISTENERS, DELIBERATELY. gRPC serves the peers; a tiny HTTP server
+	// serves /livez and /readyz, because kubelet probes speak HTTP and wiring
+	// grpc-health-probe into every image buys nothing here.
 	mux := http.NewServeMux()
-	mux.Handle("/", api.Handler())
 	health.New(lg).Register(ctx, mux, 3*time.Second, 15*time.Second,
 		func(ctx context.Context) error { return pool.Ping(ctx) })
+	httpSrv := &http.Server{Addr: ":" + httpPort, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 
-	srv := &http.Server{Addr: ":" + port, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	lis, err := grpcx.Listen(grpcPort)
+	if err != nil {
+		return err
+	}
 
-	errc := make(chan error, 1)
+	errc := make(chan error, 2)
 	go func() {
-		lg.Info("listening", zap.String("addr", srv.Addr),
-			zap.String("inventory", inventoryURL), zap.String("payments", paymentsURL))
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errc <- err
+		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errc <- fmt.Errorf("health server: %w", err)
+		}
+	}()
+	go func() {
+		lg.Info("serving grpc", zap.String("addr", lis.Addr().String()),
+			zap.String("health", httpSrv.Addr))
+		if err := grpcSrv.Serve(lis); err != nil {
+			errc <- fmt.Errorf("grpc: %w", err)
 		}
 	}()
 
 	select {
 	case err := <-errc:
-		return fmt.Errorf("serve: %w", err)
+		return err
 	case <-ctx.Done():
 		lg.Info("shutting down")
 	}
 
+	// GracefulStop lets in-flight calls finish. A saga step cut off mid-charge is
+	// exactly the ambiguity this system spends its time avoiding.
+	grpcSrv.GracefulStop()
 	drain, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	return errors.Join(srv.Shutdown(drain), shutdownObs(drain))
+	return errors.Join(httpSrv.Shutdown(drain), shutdownObs(drain))
 }

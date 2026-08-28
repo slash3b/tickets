@@ -1,0 +1,107 @@
+syntax = "proto3";
+
+package tickets.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/slash3b/tickets/gen/tickets/v1;ticketsv1";
+
+// Catalog owns what EXISTS: venues, sections, seats, events and prices.
+// It never reports availability — that is Inventory's, and the two change at
+// completely different rates for completely different reasons.
+service CatalogService {
+  rpc ListOnSale(ListOnSaleRequest) returns (ListOnSaleResponse);
+  rpc GetEvent(GetEventRequest) returns (GetEventResponse);
+  rpc ListSections(ListSectionsRequest) returns (ListSectionsResponse);
+  rpc ListSectionSeats(ListSectionSeatsRequest) returns (ListSectionSeatsResponse);
+  rpc ListEventSeatIds(ListEventSeatIdsRequest) returns (ListEventSeatIdsResponse);
+
+  // Writes. Only the seeder uses these.
+  rpc CreateEvent(CreateEventRequest) returns (CreateEventResponse);
+  rpc SetPrice(SetPriceRequest) returns (SetPriceResponse);
+  rpc CountEventsStartingOn(CountEventsStartingOnRequest) returns (CountEventsStartingOnResponse);
+  rpc FindVenueByName(FindVenueByNameRequest) returns (FindVenueByNameResponse);
+  rpc FirstSection(FirstSectionRequest) returns (FirstSectionResponse);
+  rpc CreateVenue(CreateVenueRequest) returns (CreateVenueResponse);
+  rpc AddSection(AddSectionRequest) returns (AddSectionResponse);
+}
+
+// IDs are strings carrying UUIDs rather than bytes. It costs a few bytes per
+// field and makes every payload readable in a trace, a log or grpcurl output —
+// which on a system built to be looked at is the better trade.
+message Event {
+  string id = 1;
+  string venue_id = 2;
+  string title = 3;
+  string venue = 4;
+  google.protobuf.Timestamp starts_at = 5;
+  google.protobuf.Timestamp on_sale_at = 6;
+}
+
+message Section {
+  string id = 1;
+  string name = 2;
+  int32 seats = 3;
+}
+
+message Seat {
+  string id = 1;
+  string row = 2;
+  int32 number = 3;
+  double x = 4;
+  double y = 5;
+}
+
+message ListOnSaleRequest { int32 limit = 1; }
+message ListOnSaleResponse { repeated Event events = 1; }
+
+message GetEventRequest { string event_id = 1; }
+message GetEventResponse { Event event = 1; }
+
+message ListSectionsRequest { string event_id = 1; }
+message ListSectionsResponse { repeated Section sections = 1; }
+
+message ListSectionSeatsRequest { string section_id = 1; }
+message ListSectionSeatsResponse { repeated Seat seats = 1; }
+
+message ListEventSeatIdsRequest { string event_id = 1; }
+message ListEventSeatIdsResponse { repeated string seat_ids = 1; }
+
+message CreateEventRequest {
+  string venue_id = 1;
+  string title = 2;
+  google.protobuf.Timestamp starts_at = 3;
+  google.protobuf.Timestamp on_sale_at = 4;
+}
+
+message CreateEventResponse { Event event = 1; }
+
+message SetPriceRequest {
+  string event_id = 1;
+  string section_id = 2;
+  int64 price_minor = 3;
+}
+message SetPriceResponse {}
+
+message CountEventsStartingOnRequest { google.protobuf.Timestamp day = 1; }
+message CountEventsStartingOnResponse { int32 count = 1; }
+
+message FindVenueByNameRequest { string name = 1; }
+message FindVenueByNameResponse { string venue_id = 1; }
+
+message FirstSectionRequest { string venue_id = 1; }
+message FirstSectionResponse { string section_id = 1; }
+
+message CreateVenueRequest {
+  string name = 1;
+  string kind = 2;
+}
+message CreateVenueResponse { string venue_id = 1; }
+
+message AddSectionRequest {
+  string venue_id = 1;
+  string name = 2;
+  int32 rows = 3;
+  int32 seats_per_row = 4;
+}
+message AddSectionResponse { string section_id = 1; }

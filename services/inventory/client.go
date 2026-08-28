@@ -2,88 +2,97 @@ package inventory
 
 import (
 	"context"
-	"net/http"
 	"time"
 
 	"github.com/google/uuid"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/durationpb"
 
-	"github.com/slash3b/tickets/pkg/rpc"
+	pb "github.com/slash3b/tickets/gen/tickets/v1"
 	"github.com/slash3b/tickets/services/inventory/store"
 )
 
-// Client talks to the inventory service.
+// Client wraps the generated stub in the domain signatures callers already use.
 //
-// It re-raises the store's OWN sentinel errors — store.ErrSeatsUnavailable and
-// store.ErrHoldReleased — so callers keep using errors.Is exactly as they did
-// when this was a function call. That is what made the split wiring rather than
-// rework: the gateway's 409 handling and the saga's "seats are gone" branch did
-// not change a line.
-type Client struct{ c *rpc.Client }
+// It re-raises the store's OWN sentinels, so the saga's "seats are gone" branch
+// and the gateway's 409 handling keep working with errors.Is exactly as they did
+// when this was a function call. THE STATUS CODE IS WHAT SURVIVES THE HOP; this
+// is where it turns back into an error a Go caller can switch on.
+type Client struct{ c pb.InventoryServiceClient }
 
-func NewClient(baseURL string, timeout time.Duration) *Client {
-	return &Client{c: rpc.New(baseURL, timeout)}
+func NewClient(cc grpc.ClientConnInterface) *Client {
+	return &Client{c: pb.NewInventoryServiceClient(cc)}
 }
 
 func (c *Client) Hold(ctx context.Context, eventID uuid.UUID, seatIDs []uuid.UUID, ttl time.Duration) (uuid.UUID, error) {
-	var out holdResponse
-	err := c.c.Do(ctx, http.MethodPost, "/holds",
-		holdRequest{EventID: eventID, SeatIDs: seatIDs, TTL: ttl}, &out)
-	if rpc.CodeOf(err) == CodeSeatsUnavailable {
+	resp, err := c.c.Hold(ctx, &pb.HoldRequest{
+		EventId: eventID.String(),
+		SeatIds: uuidStrings(seatIDs),
+		Ttl:     durationpb.New(ttl),
+	})
+	if status.Code(err) == codes.Aborted {
 		return uuid.Nil, store.ErrSeatsUnavailable
 	}
-	return out.HoldID, err
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return uuid.Parse(resp.GetHoldId())
 }
 
 func (c *Client) Release(ctx context.Context, holdID uuid.UUID, reason string) error {
-	return c.c.Do(ctx, http.MethodDelete, "/holds/"+holdID.String(), releaseRequest{Reason: reason}, nil)
+	_, err := c.c.Release(ctx, &pb.ReleaseRequest{HoldId: holdID.String(), Reason: reason})
+	return err
 }
 
 func (c *Client) Convert(ctx context.Context, holdID uuid.UUID) error {
-	return c.c.Do(ctx, http.MethodPost, "/holds/"+holdID.String()+"/convert", nil, nil)
+	_, err := c.c.Convert(ctx, &pb.ConvertRequest{HoldId: holdID.String()})
+	return err
 }
 
 func (c *Client) Commit(ctx context.Context, holdID uuid.UUID) error {
-	err := c.c.Do(ctx, http.MethodPost, "/holds/"+holdID.String()+"/commit", nil, nil)
-	if rpc.CodeOf(err) == CodeHoldReleased {
+	_, err := c.c.Commit(ctx, &pb.CommitRequest{HoldId: holdID.String()})
+	if status.Code(err) == codes.FailedPrecondition {
 		return store.ErrHoldReleased
 	}
 	return err
 }
 
 func (c *Client) OpenEvent(ctx context.Context, eventID uuid.UUID, seatIDs []uuid.UUID) (int, error) {
-	var out struct {
-		Opened int `json:"opened"`
-	}
-	err := c.c.Do(ctx, http.MethodPost, "/events/"+eventID.String()+"/open",
-		openRequest{SeatIDs: seatIDs}, &out)
-	return out.Opened, err
+	resp, err := c.c.OpenEvent(ctx, &pb.OpenEventRequest{
+		EventId: eventID.String(), SeatIds: uuidStrings(seatIDs),
+	})
+	return int(resp.GetOpened()), err
 }
 
 func (c *Client) SeatStatuses(ctx context.Context, eventID uuid.UUID, seatIDs []uuid.UUID) (map[uuid.UUID]string, error) {
-	var out struct {
-		Statuses map[string]string `json:"statuses"`
-	}
-	if err := c.c.Do(ctx, http.MethodPost, "/events/"+eventID.String()+"/seat-status",
-		seatStatusRequest{SeatIDs: seatIDs}, &out); err != nil {
+	resp, err := c.c.SeatStatuses(ctx, &pb.SeatStatusesRequest{
+		EventId: eventID.String(), SeatIds: uuidStrings(seatIDs),
+	})
+	if err != nil {
 		return nil, err
 	}
-	statuses := make(map[uuid.UUID]string, len(out.Statuses))
-	for k, v := range out.Statuses {
+	out := make(map[uuid.UUID]string, len(resp.GetStatuses()))
+	for k, v := range resp.GetStatuses() {
 		id, err := uuid.Parse(k)
 		if err != nil {
-			continue // a key we cannot parse is not worth failing the whole map for
+			continue // one unparseable key is not worth failing the whole map
 		}
-		statuses[id] = v
+		out[id] = v
 	}
-	return statuses, nil
+	return out, nil
 }
 
-// Sweep runs one sweeper pass. Called by workers on a ticker, never by a request.
 func (c *Client) Sweep(ctx context.Context) (expired, hardDeadline int, err error) {
-	var out struct {
-		Expired      int `json:"expired"`
-		HardDeadline int `json:"hard_deadline"`
+	resp, err := c.c.Sweep(ctx, &pb.SweepRequest{})
+	return int(resp.GetExpired()), int(resp.GetHardDeadline()), err
+}
+
+func uuidStrings(ids []uuid.UUID) []string {
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = id.String()
 	}
-	err = c.c.Do(ctx, http.MethodPost, "/internal/sweep", nil, &out)
-	return out.Expired, out.HardDeadline, err
+	return out
 }
