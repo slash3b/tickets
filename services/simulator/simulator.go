@@ -57,20 +57,49 @@ type Config struct {
 	GroupSize         int                 `json:"group_size"`
 }
 
-// DefaultConfig is one showing a day's worth of traffic, not a load test.
+// DefaultConfig paces one showing's 96 seats across a whole DAY, while keeping
+// the request rate high enough that the system is never silent.
 //
-// A system that is quietly busy is observable and debuggable. A system under
-// permanent stress is neither, and it outruns anyone's ability to read the code
-// that produced it. Load only goes up when someone turns it up on purpose.
+// THOSE ARE TWO SEPARATE DIALS AND CONFLATING THEM WAS THE ORIGINAL MISTAKE. The
+// first mix sold 0.5 seats per arrival, so at two arrivals a minute the day's
+// showing was gone in about an hour and a half — after which the simulator could
+// only browse, and holds, orders, payments and the bank emitted nothing for the
+// other twenty-two hours. Half the system was invisible most of the day.
+//
+// The fix is NOT fewer arrivals. Pacing 96 seats over 24h purely by rate needs
+// 0.13 arrivals a minute — one session every seven and a half minutes — which
+// hits the target by making the whole thing quiet, which is the opposite of what
+// the simulator is for. Instead the ARRIVAL RATE stays where it was and the MIX
+// carries the pacing: far more lookers, far fewer buyers.
+//
+// THE ARITHMETIC, so this stays retunable. Only decisive and group consume a seat
+// permanently — picky releases its hold and abandoner lets it expire, so both
+// generate load without ever reducing stock:
+//
+//	seats per arrival = decisive*1 + group*3
+//	                  = 0.015 + 0.006*3 = 0.033
+//	seats per day     = 0.033 * 2 arrivals/min * 1440 min = 95
+//
+// which is one showing's 96 seats, give or take. Arrivals are Poisson, so some
+// days sell out a little early and some end with seats unsold; a metronome would
+// be less realistic and no more useful.
+//
+// A 93% look-to-buy ratio is not pessimism, it is roughly what real ticketing
+// conversion looks like. It also keeps every profile properly exercised: at 2880
+// sessions a day that is still ~86 picky sessions churning holds and ~58
+// abandoners feeding the expiry sweeper, which nothing else exercises under real
+// conditions.
+//
+// Load only goes up when someone turns it up on purpose.
 func DefaultConfig() Config {
 	return Config{
 		ArrivalsPerMinute: 2,
 		Mix: map[Profile]float64{
-			ProfileBrowser:   0.55, // most people never buy
-			ProfileDecisive:  0.20,
-			ProfilePicky:     0.10,
-			ProfileGroup:     0.10,
-			ProfileAbandoner: 0.05,
+			ProfileBrowser:   0.929, // most people never buy, and it is not close
+			ProfileDecisive:  0.015, // 1 seat
+			ProfilePicky:     0.030, // holds then releases — churn, no stock consumed
+			ProfileGroup:     0.006, // 3 seats, the interesting contention
+			ProfileAbandoner: 0.020, // hold left to the sweeper, no stock consumed
 		},
 		GroupSize: 3,
 	}
