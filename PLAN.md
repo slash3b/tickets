@@ -151,8 +151,8 @@ stack were deleted 2026-08-24; this installs onto a clean cluster.
   OTel Collector        The ingest point. SigNoz ships its own, and it speaks plain OTLP -
                         there is no proprietary agent anywhere in this stack.
                         THIS IS THE PART THAT MATTERS MOST STRATEGICALLY: our services
-                        emit vanilla OTLP and know nothing about SigNoz. cineplex/pkg/otel
-                        already does this and needs no change. If SigNoz disappoints, the
+                        emit vanilla OTLP and know nothing about SigNoz. pkg/obs is the
+                        only place that imports an exporter. If SigNoz disappoints, the
                         migration to the Grafana stack is a collector config change and a
                         new backend - not a single line touched in eight services.
                         Cost: ~1Gi.

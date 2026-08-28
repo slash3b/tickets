@@ -212,9 +212,12 @@ written down here first.
   It costs 32Mi and 10m of CPU. If it ever stops being maintained it becomes exactly
   the kind of leftover this project keeps deleting, so it is maintained deliberately.
 
-Language is Go for every service, reusing cineplex/pkg (logger, otel, health, http, env,
-option) as the shared foundation. That package set is already good and is the main thing
-worth keeping from cineplex. Every service exposes /livez and /readyz and emits OTLP to
+Language is Go for every service, over a small shared pkg/ (logger, obs, health, env,
+migrate). That set was lifted from the old cineplex project, whose
+directory was DELETED from this repo on 2026-08-28 - the lift was finished, nothing
+imported it, and it was a separate Go module that no build touched. Its removal from the
+CLUSTER happened earlier and separately; see TEARDOWN 2026-08-23 in infra/CLUSTER.md.
+Every service exposes /livez and /readyz and emits OTLP to
 the node's Alloy agent; none of them know what is behind it.
 
 DEPENDENCY DIRECTION. Arrows point from caller to callee. There are no cycles, and any
@@ -629,12 +632,11 @@ Monorepo. Go workspace at the root.
   services/
     gateway/  catalog/  inventory/  orders/  payments/  bank/  simulator/
   web/                  React SPA
-  pkg/                  lifted from cineplex/pkg - logger, otel, health, http, env
+  pkg/                  logger, obs (traces+metrics+logs), health, env, migrate
   deploy/
     base/               kustomize per service
     overlays/homelab/   what Argo CD actually syncs
   infra/                CLUSTER.md and cluster scripts. Stays as is.
-  cineplex/             kept for reference until pkg/ is extracted, then deleted.
   tpl/                  becomes the new-service generator, or is deleted.
 
 Each service owns its Dockerfile. Nothing imports another service's internal package -
@@ -667,8 +669,8 @@ installed and why that was chosen over assembling the Grafana stack.
 
 WHAT THE SERVICES ACTUALLY DO is the important part here, and it is almost nothing:
 
-  Every service emits plain OTLP. cineplex/pkg/otel already does this and gets lifted
-  wholesale. No service imports a SigNoz package, knows a SigNoz hostname, or contains
+  Every service emits plain OTLP through pkg/obs. No service imports a SigNoz
+  package, knows a SigNoz hostname, or contains
   the string "signoz" anywhere. They speak OTLP to a collector endpoint given by an
   environment variable.
 
