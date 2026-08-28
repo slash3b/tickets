@@ -1,18 +1,17 @@
 // The singletons.
 //
-// Three background loops that must run EXACTLY ONCE in the cluster:
+// Three background loops that must run EXACTLY ONCE in the cluster: the
+// inventory sweep, the payment reconciler and the order resumer.
 //
-//	inventory expiry sweeper   returns seats whose short TTL ran out
-//	inventory hard-deadline    returns seats stuck converting, flags for refund
-//	payments reconciler        establishes what the bank actually did
-//	orders resumer             drives crashed sagas forward
+// SINCE THE SPLIT IT OWNS NO DATA AND NO DATABASE. It is a ticker that calls
+// /internal/* on the service that owns each loop. That is the point: the loops
+// have to be singletons, but the SERVICES they act on do not — keeping the timer
+// out here is what lets inventory run more than one replica when the seat-claim
+// path needs it, which is exactly what milestone 9 will ask for.
 //
-// They live in their own binary, deployed with replicas: 1, precisely so that
-// scaling the API cannot accidentally scale them. Nothing here is unsafe
-// concurrently — every operation is idempotent — but N replicas do N times the
-// work on the same rows and manufacture the lock contention the rest of the
-// design works to avoid. The payments reconciler would also hammer the one
-// dependency you least want to hammer.
+// THIS MUST STAY AT ONE REPLICA. Nothing here is unsafe concurrently, but N
+// replicas do N times the work on the same rows and multiply traffic to the bank.
+// strategy: Recreate is deliberate — a rolling update would briefly run two.
 package main
 
 import (
@@ -25,20 +24,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/slash3b/tickets/pkg/env"
 	"github.com/slash3b/tickets/pkg/health"
 	"github.com/slash3b/tickets/pkg/logger"
-	"github.com/slash3b/tickets/pkg/migrate"
 	"github.com/slash3b/tickets/pkg/obs"
-
-	catalogstore "github.com/slash3b/tickets/services/catalog/store"
-	"github.com/slash3b/tickets/services/gateway"
-	inventorystore "github.com/slash3b/tickets/services/inventory/store"
-	ordersstore "github.com/slash3b/tickets/services/orders/store"
-	"github.com/slash3b/tickets/services/payments/bankclient"
-	paystore "github.com/slash3b/tickets/services/payments/store"
+	"github.com/slash3b/tickets/services/inventory"
+	"github.com/slash3b/tickets/services/orders"
+	"github.com/slash3b/tickets/services/payments"
 
 	"go.uber.org/zap"
 )
@@ -57,16 +49,14 @@ func main() {
 
 func run() error {
 	var (
-		port    = env.Get("PORT", "8080")
-		debug   = env.Get("DEBUG", "false") == "true"
-		otlp    = env.Get("OTEL_EXPORTER_OTLP_ENDPOINT", "")
-		dsn     = env.Get("DATABASE_URL", "")
-		bankURL = env.Get("BANK_URL", "http://bank.bank.svc.cluster.local")
-		every   = envDuration("SWEEP_INTERVAL", 30*time.Second)
+		port         = env.Get("PORT", "8080")
+		debug        = env.Get("DEBUG", "false") == "true"
+		otlp         = env.Get("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+		inventoryURL = env.Get("INVENTORY_URL", "http://inventory.tickets.svc.cluster.local")
+		ordersURL    = env.Get("ORDERS_URL", "http://orders.tickets.svc.cluster.local")
+		paymentsURL  = env.Get("PAYMENTS_URL", "http://payments.tickets.svc.cluster.local")
+		every        = envDuration("SWEEP_INTERVAL", 30*time.Second)
 	)
-	if dsn == "" {
-		return errors.New("DATABASE_URL is required")
-	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -78,106 +68,84 @@ func run() error {
 	lg, flush := logger.MustNew(service, debug, logProvider)
 	defer func() { _ = flush() }()
 
-	// obs.Pool, not pgxpool.New: every query becomes a span. The conditional
-	// UPDATE that claims a seat is the most interesting thing this system does,
-	// and this is what makes it visible as a timed operation inside the request
-	// that ran it.
-	pool, err := obs.Pool(ctx, dsn)
-	if err != nil {
-		return fmt.Errorf("database: %w", err)
-	}
-	defer pool.Close()
+	// Generous timeouts: a pass that takes a while is fine, it runs on a ticker
+	// and nobody is waiting. Reconcile is longest because it may talk to a bank
+	// that is deliberately slow.
+	inv := inventory.NewClient(inventoryURL, 30*time.Second)
+	ord := orders.NewClient(ordersURL, 60*time.Second)
+	pay := payments.NewClient(paymentsURL, 60*time.Second)
 
-	// Applied by whichever process starts first; the advisory lock inside makes
-	// concurrent starts safe. See pkg/migrate for what this is and is not.
-	if err := migrate.Apply(ctx, pool,
-		catalogstore.SchemaSQL, inventorystore.SchemaSQL,
-		ordersstore.SchemaSQL, paystore.SchemaSQL); err != nil {
-		return fmt.Errorf("apply schema: %w", err)
-	}
+	go loop(ctx, lg, "sweep", every, func(ctx context.Context) (string, error) {
+		expired, hard, err := inv.Sweep(ctx)
+		if hard > 0 {
+			// A hold reaching its HARD deadline was stuck in `converting`, which
+			// means a payment outcome was never established. Not routine cleanup.
+			lg.Warn("holds hit the hard deadline", zap.Int("count", hard))
+		}
+		return fmt.Sprintf("expired=%d hard=%d", expired, hard), err
+	})
 
-	inv := inventorystore.New(pool)
-	ord := ordersstore.New(pool)
-	pay := paystore.New(pool)
-	bankCli := bankclient.New(bankURL, 5*time.Second)
+	go loop(ctx, lg, "reconcile", every, func(ctx context.Context) (string, error) {
+		n, err := pay.Reconcile(ctx)
+		return fmt.Sprintf("resolved=%d", n), err
+	})
 
-	sweeper := inventorystore.NewSweeper(inv, every)
-	sweeper.OnError = func(err error) { lg.Error("sweep failed", zap.Error(err)) }
-	sweeper.OnHardDeadline = func(ids []uuid.UUID) {
-		// Money may have moved against seats that are now gone. Rare enough that
-		// it should be alertable, loud enough that it never passes unnoticed.
-		lg.Error("holds crossed the hard deadline and need reconciliation",
-			zap.Int("count", len(ids)), zap.Any("hold_ids", ids))
-	}
+	go loop(ctx, lg, "resume", every, func(ctx context.Context) (string, error) {
+		n, err := ord.Resume(ctx)
+		return fmt.Sprintf("resumed=%d", n), err
+	})
 
-	reconciler := paystore.NewReconciler(pay, bankCli, time.Minute)
-	reconciler.OnError = func(err error) { lg.Error("reconcile failed", zap.Error(err)) }
-	reconciler.OnResolved = func(orderID string, state paystore.State) {
-		lg.Info("payment resolved by reconciliation",
-			zap.String("order_id", orderID), zap.String("state", string(state)))
-	}
-	reconciler.OnStuck = func(p *paystore.Payment) {
-		lg.Error("payment stuck; the bank cannot account for it",
-			zap.String("order_id", p.OrderID.String()),
-			zap.Int("attempts", p.ReconcileAttempts))
-	}
-
-	saga := ordersstore.NewSaga(ord, gateway.InventoryAdapter{S: inv},
-		paymentsBridge{store: pay, bank: bankCli})
-	resumer := ordersstore.NewResumer(saga, ord, time.Minute)
-	resumer.OnError = func(err error) { lg.Error("resume failed", zap.Error(err)) }
-	resumer.OnResumed = func(id uuid.UUID, from ordersstore.State) {
-		lg.Info("resumed a stalled order",
-			zap.String("order_id", id.String()), zap.String("from", string(from)))
-	}
-
-	go sweeper.Run(ctx)
-	go reconciler.Run(ctx, every)
-	go resumer.Run(ctx, every)
-
-	lg.Info("singletons running", zap.Duration("interval", every))
-
-	// Probes only — this binary serves no traffic, but Kubernetes still needs to
-	// know whether it is alive and whether it can reach the database.
 	mux := http.NewServeMux()
-	health.New(lg).Register(ctx, mux, 3*time.Second, 15*time.Second,
-		func(ctx context.Context) error { return pool.Ping(ctx) })
+	health.New(lg).Register(ctx, mux, 3*time.Second, 15*time.Second)
 	srv := &http.Server{Addr: ":" + port, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 
+	errc := make(chan error, 1)
 	go func() {
+		lg.Info("running", zap.String("addr", srv.Addr), zap.Duration("every", every),
+			zap.String("inventory", inventoryURL), zap.String("orders", ordersURL),
+			zap.String("payments", paymentsURL))
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			lg.Error("probe server", zap.Error(err))
+			errc <- err
 		}
 	}()
 
-	<-ctx.Done()
-	lg.Info("shutting down")
+	select {
+	case err := <-errc:
+		return fmt.Errorf("serve: %w", err)
+	case <-ctx.Done():
+		lg.Info("shutting down")
+	}
 
 	drain, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	return errors.Join(srv.Shutdown(drain), shutdownObs(drain))
 }
 
-type paymentsBridge struct {
-	store *paystore.Store
-	bank  *bankclient.Client
-}
+// loop runs one pass every interval until ctx is done.
+//
+// A FAILED PASS IS LOGGED AND THE LOOP CONTINUES. These are idempotent catch-up
+// jobs: whatever this pass missed, the next one finds. Exiting on error would
+// stop the only thing that repairs the system, at exactly the moment it is needed.
+func loop(ctx context.Context, lg *zap.Logger, name string, every time.Duration,
+	once func(context.Context) (string, error)) {
 
-func (p paymentsBridge) Charge(ctx context.Context, orderID uuid.UUID, amountMinor int64) (ordersstore.PaymentOutcome, string, error) {
-	pay, err := p.store.Create(ctx, orderID, amountMinor)
-	if err != nil {
-		return "", "", err
-	}
-	charge, err := p.bank.AuthorizeAndReconcile(ctx, pay.IdempotencyKey, amountMinor)
-	switch {
-	case err == nil:
-		return ordersstore.PaymentSucceeded, "",
-			p.store.Resolve(ctx, orderID, paystore.StateSucceeded, charge.ID, "")
-	case charge != nil && charge.Status == "declined":
-		return ordersstore.PaymentFailed, charge.DeclineCode,
-			p.store.Resolve(ctx, orderID, paystore.StateFailed, "", charge.DeclineCode)
-	default:
-		return ordersstore.PaymentUnknown, "", p.store.MarkUnknown(ctx, orderID)
+	t := time.NewTicker(every)
+	defer t.Stop()
+
+	for {
+		result, err := once(ctx)
+		switch {
+		case err != nil && ctx.Err() == nil:
+			lg.Error(name+" failed", zap.Error(err))
+		case err == nil:
+			lg.Debug(name+" done", zap.String("result", result))
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
 	}
 }
 

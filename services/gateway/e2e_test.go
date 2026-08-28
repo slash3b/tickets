@@ -14,9 +14,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/slash3b/tickets/services/bank"
+	"github.com/slash3b/tickets/services/catalog"
 	catalogstore "github.com/slash3b/tickets/services/catalog/store"
+	"github.com/slash3b/tickets/services/inventory"
 	inventorystore "github.com/slash3b/tickets/services/inventory/store"
+	"github.com/slash3b/tickets/services/orders"
 	ordersstore "github.com/slash3b/tickets/services/orders/store"
+	"github.com/slash3b/tickets/services/payments"
 	"github.com/slash3b/tickets/services/payments/bankclient"
 	paystore "github.com/slash3b/tickets/services/payments/store"
 
@@ -25,31 +29,15 @@ import (
 	"go.uber.org/zap"
 )
 
-// paymentsAdapter is the bridge orders needs: charge an order, once.
-type paymentsAdapter struct {
-	store *paystore.Store
-	bank  *bankclient.Client
-}
-
-func (p paymentsAdapter) Charge(ctx context.Context, orderID uuid.UUID, amountMinor int64) (ordersstore.PaymentOutcome, string, error) {
-	pay, err := p.store.Create(ctx, orderID, amountMinor)
-	if err != nil {
-		return "", "", err
-	}
-	charge, err := p.bank.AuthorizeAndReconcile(ctx, pay.IdempotencyKey, amountMinor)
-	switch {
-	case err == nil:
-		return ordersstore.PaymentSucceeded, "", p.store.Resolve(ctx, orderID, paystore.StateSucceeded, charge.ID, "")
-	case charge != nil && charge.Status == "declined":
-		return ordersstore.PaymentFailed, charge.DeclineCode,
-			p.store.Resolve(ctx, orderID, paystore.StateFailed, "", charge.DeclineCode)
-	default:
-		return ordersstore.PaymentUnknown, "", p.store.MarkUnknown(ctx, orderID)
-	}
-}
-
-// buildSystem wires every service together against one real database and one real
-// (fake) bank, and returns the gateway's HTTP surface.
+// buildSystem stands up the WHOLE SYSTEM over real HTTP: catalog, inventory,
+// payments and orders each as their own server, the fake bank behind payments,
+// and the gateway calling all of them as clients.
+//
+// It deliberately does NOT wire the stores together in-process any more. Before
+// the split that was the same thing; it is not any more, and the difference is
+// exactly where this system can now break. A lost race has to come back as a 409
+// with a code that the inventory client turns back into ErrSeatsUnavailable, and
+// a test that skipped the network would prove nothing about that.
 func buildSystem(t *testing.T, bankCfg bank.Config) (*httptest.Server, *catalogstore.Store, *inventorystore.Store, *pgxpool.Pool) {
 	t.Helper()
 
@@ -59,8 +47,6 @@ func buildSystem(t *testing.T, bankCfg bank.Config) (*httptest.Server, *catalogs
 	}
 	ctx := context.Background()
 
-	// obs.Pool, not pgxpool.New — the same constructor the binaries use, so the
-	// trace test below sees the database spans production would emit.
 	pool, err := obs.Pool(ctx, dsn)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
@@ -75,8 +61,6 @@ func buildSystem(t *testing.T, bankCfg bank.Config) (*httptest.Server, *catalogs
 			t.Fatalf("schema: %v", err)
 		}
 	}
-	// Each test starts from nothing; the resumer and reconciler are global by
-	// design and would otherwise act on other tests' rows.
 	for _, q := range []string{
 		`TRUNCATE catalog.venues CASCADE`, `TRUNCATE inventory.holds CASCADE`,
 		`TRUNCATE inventory.event_seats`, `TRUNCATE orders.orders CASCADE`,
@@ -87,27 +71,43 @@ func buildSystem(t *testing.T, bankCfg bank.Config) (*httptest.Server, *catalogs
 		}
 	}
 
+	// Silent loggers: the access logs are not what these tests assert, and five
+	// services' worth of them would bury the failure message.
+	nop := zap.NewNop()
+
 	cat := catalogstore.New(pool)
 	inv := inventorystore.New(pool)
 	ord := ordersstore.New(pool)
 	pay := paystore.New(pool)
 
-	b := bank.New(bankCfg)
-	bankSrv := httptest.NewServer(b.Handler())
+	bankSrv := httptest.NewServer(bank.New(bankCfg).Handler())
 	t.Cleanup(bankSrv.Close)
-	client := bankclient.New(bankSrv.URL, 2*time.Second)
+	bankCli := bankclient.New(bankSrv.URL, 2*time.Second)
 
-	saga := ordersstore.NewSaga(ord, InventoryAdapter{S: inv},
-		paymentsAdapter{store: pay, bank: client})
+	catSrv := httptest.NewServer(catalog.New(cat, nop).Handler())
+	t.Cleanup(catSrv.Close)
+
+	invSrv := httptest.NewServer(inventory.New(inv, nop).Handler())
+	t.Cleanup(invSrv.Close)
+
+	paySrv := httptest.NewServer(payments.New(
+		pay, bankCli, paystore.NewReconciler(pay, bankCli, time.Minute), nop).Handler())
+	t.Cleanup(paySrv.Close)
+
+	// Orders talks to inventory and payments as clients, exactly as in the cluster.
+	invCli := inventory.NewClient(invSrv.URL, 5*time.Second)
+	payCli := payments.NewClient(paySrv.URL, 15*time.Second)
+	saga := ordersstore.NewSaga(ord, invCli, orders.PaymentsAdapter{C: payCli})
+	ordSrv := httptest.NewServer(orders.New(
+		ord, saga, ordersstore.NewResumer(saga, ord, time.Minute), nop).Handler())
+	t.Cleanup(ordSrv.Close)
 
 	api := New(
-		CatalogAdapter{S: cat},
-		InventoryAdapter{S: inv},
-		OrdersAdapter{S: ord, Saga: saga},
+		CatalogClient{C: catalog.NewClient(catSrv.URL, 5*time.Second)},
+		InventoryClient{C: invCli},
+		orders.NewClient(ordSrv.URL, 20*time.Second),
 		5*time.Minute,
-		// Access logs are asserted nowhere; a real logger here would just spray
-		// the test output. The correlation they carry is covered by the trace test.
-		zap.NewNop(),
+		nop,
 	)
 
 	srv := httptest.NewServer(api.Handler())

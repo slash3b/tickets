@@ -1,44 +1,50 @@
 // Creates one showing, once a day.
 //
 // Run as a CronJob. This is what makes the system permanently have something to
-// do without anybody deciding to give it work — the standing rule for this
-// project is one showing per day, quietly, and an on-sale burst is something a
-// human triggers.
+// do without anybody deciding to give it work.
 //
-// IDEMPOTENT. A CronJob that fires twice, a retried pod, or a manual run must not
-// produce two showings for the same day.
+// SINCE THE SPLIT IT HAS NO DATABASE. It calls catalog to create the showing and
+// inventory to open its seats — the same two hops any other client would make,
+// which is the point: a job with direct table access would have been the obvious
+// shortcut and would have quietly made "inventory is the only writer of seat
+// status" false again.
 package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/slash3b/tickets/pkg/env"
 	"github.com/slash3b/tickets/pkg/logger"
-	"github.com/slash3b/tickets/pkg/migrate"
-	catalogstore "github.com/slash3b/tickets/services/catalog/store"
-	inventorystore "github.com/slash3b/tickets/services/inventory/store"
-	ordersstore "github.com/slash3b/tickets/services/orders/store"
-	paystore "github.com/slash3b/tickets/services/payments/store"
-
 	"github.com/slash3b/tickets/pkg/obs"
-	"go.uber.org/zap"
+	"github.com/slash3b/tickets/services/catalog"
+	"github.com/slash3b/tickets/services/inventory"
 
 	"go.opentelemetry.io/otel"
+	"go.uber.org/zap"
 )
 
-const venueName = "Cineplex Screen 1"
+const (
+	service   = "seeder"
+	version   = "0.1.0"
+	venueName = "Cineplex Screen 1"
+)
 
 // A rotating title list, so a week of showings is not seven identical rows.
 var titles = []string{
-	"Dune: Part Three", "Blade Runner 2069", "The Grand Budapest Sequel",
-	"Arrival II", "Heat 2", "Children of Men Redux", "Solaris",
+	"Blade Runner 2069",
+	"The Grand Budapest Sequel",
+	"Dune: Part Nine",
+	"Everything Everywhere All At Lunch",
+	"No Country for Cold Servers",
+	"The Kubernetes Identity",
+	"Once Upon a Time in Postgres",
 }
 
 func main() {
@@ -48,28 +54,22 @@ func main() {
 	}
 }
 
-const version = "0.1.0"
-
 func run() error {
-	dsn := env.Get("DATABASE_URL", "")
-	if dsn == "" {
-		return fmt.Errorf("DATABASE_URL is required")
-	}
+	var (
+		debug        = env.Get("DEBUG", "false") == "true"
+		otlp         = env.Get("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+		catalogURL   = env.Get("CATALOG_URL", "http://catalog.tickets.svc.cluster.local")
+		inventoryURL = env.Get("INVENTORY_URL", "http://inventory.tickets.svc.cluster.local")
+	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	// The seeder used to pass nil here and never call obs.Setup at all, so the one
-	// job that decides whether there is anything to sell tomorrow reported nothing
-	// to the backend — and a CronJob is precisely the thing you cannot watch by
-	// eye. Its pod is gone by the time you wonder whether it ran.
-	shutdownObs, logProvider, err := obs.Setup(ctx, "seeder", version,
-		env.Get("OTEL_EXPORTER_OTLP_ENDPOINT", ""))
+	shutdownObs, logProvider, err := obs.Setup(ctx, service, version, otlp)
 	if err != nil {
 		return fmt.Errorf("observability: %w", err)
 	}
-
-	lg, flush := logger.MustNew("seeder", env.Get("DEBUG", "false") == "true", logProvider)
+	lg, flush := logger.MustNew(service, debug, logProvider)
 	defer func() { _ = flush() }()
 
 	// A CronJob exits immediately after its work. Without an explicit flush the
@@ -81,34 +81,16 @@ func run() error {
 		_ = shutdownObs(drain)
 	}()
 
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		return fmt.Errorf("database: %w", err)
-	}
-	defer pool.Close()
-
-	if err := migrate.Apply(ctx, pool,
-		catalogstore.SchemaSQL, inventorystore.SchemaSQL,
-		ordersstore.SchemaSQL, paystore.SchemaSQL); err != nil {
-		return fmt.Errorf("apply schema: %w", err)
-	}
-
-	// A span for the whole run, so the CronJob appears in the service list at all
-	// and a failed seeding is something you can find rather than something you
-	// notice tomorrow when there is nothing to sell.
-	ctx, span := otel.Tracer("seeder").Start(ctx, "seed")
+	ctx, span := otel.Tracer(service).Start(ctx, "seed")
 	defer span.End()
 
-	cat := catalogstore.New(pool)
-	inv := inventorystore.New(pool)
+	cat := catalog.NewClient(catalogURL, 15*time.Second)
+	inv := inventory.NewClient(inventoryURL, 30*time.Second)
 
 	// Tomorrow evening, on sale now.
 	//
 	// SEED_DAYS_AHEAD exists so a showing can be created on demand without waiting
 	// for 03:00 or editing the CronJob. The daily run leaves it unset and gets 1.
-	// It earns its place because the day's seats DO sell out — the simulator
-	// drained all 96 on 2026-08-27 — and once they have, there is nothing left to
-	// hold, buy, or trace until the next cron fires.
 	days := 1
 	if n, err := strconv.Atoi(env.Get("SEED_DAYS_AHEAD", "")); err == nil && n > 0 {
 		days = n
@@ -117,7 +99,7 @@ func run() error {
 
 	existing, err := cat.CountEventsStartingOn(ctx, startsAt)
 	if err != nil {
-		return fmt.Errorf("check for today's showing: %w", err)
+		return fmt.Errorf("check for that day's showing: %w", err)
 	}
 	if existing > 0 {
 		lg.Info("a showing already exists for that day; nothing to do",
@@ -125,24 +107,8 @@ func run() error {
 		return nil
 	}
 
-	venueID, err := cat.FindVenueByName(ctx, venueName)
+	venueID, sectionID, err := venue(ctx, cat, lg)
 	if err != nil {
-		return err
-	}
-	sectionID := venueID
-	if venueID == uuid.Nil {
-		v, err := cat.CreateVenue(ctx, venueName, "cinema")
-		if err != nil {
-			return fmt.Errorf("create venue: %w", err)
-		}
-		venueID = v.ID
-		// 8 rows of 12 — a realistic small screen at 96 seats. Big enough for
-		// contention to be visible, small enough to sell out in a day.
-		if sectionID, err = cat.AddSection(ctx, venueID, "Stalls", 8, 12); err != nil {
-			return fmt.Errorf("add section: %w", err)
-		}
-		lg.Info("created the venue", zap.String("venue", venueName))
-	} else if sectionID, err = cat.FirstSectionID(ctx, venueID); err != nil {
 		return err
 	}
 
@@ -172,4 +138,33 @@ func run() error {
 		zap.Time("starts_at", startsAt),
 		zap.Int("seats_opened", opened))
 	return nil
+}
+
+// venue finds the cinema, creating it the first time this ever runs.
+//
+// ErrNoVenue has to be distinguishable from a transport failure: one means the
+// catalog was never bootstrapped and we should build it, the other means the
+// catalog is down and building anything would be wrong.
+func venue(ctx context.Context, cat *catalog.Client, lg *zap.Logger) (venueID, sectionID uuid.UUID, err error) {
+	venueID, err = cat.FindVenueByName(ctx, venueName)
+	switch {
+	case errors.Is(err, catalog.ErrNoVenue):
+		if venueID, err = cat.CreateVenue(ctx, venueName, "cinema"); err != nil {
+			return uuid.Nil, uuid.Nil, fmt.Errorf("create venue: %w", err)
+		}
+		// 8 rows of 12 — a realistic small screen at 96 seats. Big enough for
+		// contention to be visible, small enough to sell out in a day.
+		if sectionID, err = cat.AddSection(ctx, venueID, "Stalls", 8, 12); err != nil {
+			return uuid.Nil, uuid.Nil, fmt.Errorf("add section: %w", err)
+		}
+		lg.Info("created the venue", zap.String("venue", venueName))
+		return venueID, sectionID, nil
+	case err != nil:
+		return uuid.Nil, uuid.Nil, fmt.Errorf("find venue: %w", err)
+	}
+
+	if sectionID, err = cat.FirstSectionID(ctx, venueID); err != nil {
+		return uuid.Nil, uuid.Nil, fmt.Errorf("first section: %w", err)
+	}
+	return venueID, sectionID, nil
 }
