@@ -165,8 +165,17 @@ jobs:
             exit 0
           fi
           git commit -m "deploy: $SHA [skip ci]" -m "$(git diff --staged --name-only)"
-          # One job means one pusher, so a rejection here can only come from a
-          # human pushing at the same moment. Rebase once and try again.
+          # One job means one pusher — but only within a run. A FORCE-PUSH TO main
+          # WHILE A BUILD IS IN FLIGHT breaks that: concurrency here queues rather
+          # than cancels, so the old run and the new one both reach this step and
+          # race. That happened on 2026-08-28 amending a commit message; the loser
+          # failed here, and deploy/ was left pinned to a SHA that no longer
+          # existed in history. The images were identical, so nothing was broken,
+          # but the pin pointed at nothing you could look up.
+          #
+          # If that happens again: the images for the surviving SHA were still
+          # pushed by the failed run, so re-pin to it rather than rebuilding.
+          # Rebase once and try again covers the ordinary case, a human pushing.
           git push || { git pull --rebase origin main && git push; }
         env:
           SHA: ${{ github.sha }}
