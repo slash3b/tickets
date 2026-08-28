@@ -59,6 +59,11 @@ say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 #
 # One statement, so Postgres resolves the foreign keys itself rather than making
 # the order of this list load-bearing.
+#
+# These are four services' schemas in one database. That is not a boundary
+# violation — each service is the only one with credentials for its own schema —
+# but it does mean the wipe reaches across all four, which is exactly what makes
+# it a wipe and not four of them.
 read -r -d '' TRUNCATE_SQL <<'SQL' || true
 TRUNCATE
   catalog.events,
@@ -186,9 +191,11 @@ spec:
         - name: seeder
           image: $img
           env:
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef: {name: tickets-pg-app, key: uri}
+            # The seeder has no database of its own since the split: it creates
+            # the showing through catalog and opens the seats through inventory,
+            # so both must be up for this step to work.
+            - {name: CATALOG_ADDR,   value: "catalog.$NS_APP.svc.cluster.local:9090"}
+            - {name: INVENTORY_ADDR, value: "inventory.$NS_APP.svc.cluster.local:9090"}
             - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "signoz-otel-collector.$NS_SIGNOZ.svc.cluster.local:4318"}
           resources:
             requests: {cpu: 10m, memory: 32Mi}
