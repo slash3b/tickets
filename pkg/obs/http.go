@@ -2,6 +2,7 @@ package obs
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -96,7 +97,20 @@ func Pool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 		// that says nothing in a single-database system.
 		otelpgx.WithDisableConnectionDetailsInAttributes(),
 	)
-	return pgxpool.NewWithConfig(ctx, cfg)
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	// POOL METRICS. DESIGN.md asks, as an open question, whether Go's pool is
+	// enough at this scale or whether pgbouncer is needed. That is not answerable
+	// by opinion — it is answerable by watching acquire wait time and how often
+	// the pool is empty under load, which is what these record.
+	if err := otelpgx.RecordStats(pool); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("pool metrics: %w", err)
+	}
+	return pool, nil
 }
 
 // Access logs one line per request, correlated to the trace.

@@ -13,7 +13,6 @@ import (
 	"github.com/slash3b/tickets/services/payments/bankclient"
 )
 
-
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
 

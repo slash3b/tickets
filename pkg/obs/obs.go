@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"time"
 
+	otelruntime "go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
@@ -122,6 +123,18 @@ func Setup(ctx context.Context, service, version, endpoint string) (Shutdown, ot
 	)
 	if err != nil {
 		return nil, nil, errors.Join(fmt.Errorf("otlp log exporter: %w", err),
+			tp.Shutdown(ctx), mp.Shutdown(ctx))
+	}
+
+	// RUNTIME METRICS, for every service, free. heap in use, goroutine count, GC
+	// pause time, allocation rate. The k8s-infra DaemonSet already reports CPU and
+	// memory PER POD, but that is the container's view: it cannot tell a memory
+	// climb caused by a leak from one caused by a bigger workload, and it is keyed
+	// by pod name so it does not survive a rollout. These are keyed by
+	// service.name and describe the process's own behaviour, which is the half
+	// that answers "why".
+	if err := otelruntime.Start(otelruntime.WithMeterProvider(mp)); err != nil {
+		return nil, nil, errors.Join(fmt.Errorf("runtime metrics: %w", err),
 			tp.Shutdown(ctx), mp.Shutdown(ctx))
 	}
 

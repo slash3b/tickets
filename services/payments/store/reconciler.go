@@ -7,6 +7,11 @@ import (
 	"time"
 
 	"github.com/slash3b/tickets/services/payments/bankclient"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // Charger is the slice of the bank client the reconciler needs. Narrow on
@@ -50,10 +55,18 @@ const stuckAfter = 5
 
 // Once resolves one batch and reports how many reached a definite outcome.
 func (r *Reconciler) Once(ctx context.Context) (int, error) {
+	// The reconciler resolves payments the bank never answered for. Like the other
+	// two loops it is invisible when healthy and equally invisible when dead.
+	ctx, span := tracer.Start(ctx, "reconcile")
+	defer span.End()
+
 	pending, err := r.store.Unresolved(ctx, r.minAge, r.batch)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "list unresolved")
 		return 0, fmt.Errorf("list unresolved: %w", err)
 	}
+	span.SetAttributes(attribute.Int("payments.unresolved", len(pending)))
 
 	resolved := 0
 	for _, p := range pending {
@@ -64,6 +77,7 @@ func (r *Reconciler) Once(ctx context.Context) (int, error) {
 		}
 		if done {
 			resolved++
+			reconciled.Add(ctx, 1)
 		}
 	}
 	return resolved, nil
@@ -144,3 +158,16 @@ func (r *Reconciler) report(err error) {
 		r.OnError(err)
 	}
 }
+
+var (
+	tracer = otel.Tracer("payments")
+	meter  = otel.Meter("payments")
+
+	// Payments the bank never answered for, that the reconciler had to establish
+	// the truth about afterwards. THE UNKNOWN STATE IS THE DANGEROUS ONE — it is
+	// the only path where a customer can be charged for seats they did not get —
+	// so how often it happens is worth a number rather than an anecdote.
+	reconciled, _ = meter.Int64Counter("tickets.payments.reconciled",
+		metric.WithDescription("Payments resolved by the reconciler after an unknown outcome"),
+		metric.WithUnit("{payment}"))
+)

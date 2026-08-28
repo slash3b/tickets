@@ -1,11 +1,12 @@
 // Package health serves the two probes Kubernetes needs.
 //
-// /livez  is the app alive? Failing it makes kubelet RESTART the container, so it
-//         must only fail when a restart would actually help — a deadlock, not a
-//         missing database.
-// /readyz is the app able to serve? Failing it removes the pod from Service
-//         endpoints but leaves it running. This is the one that may fail
-//         temporarily: during startup, or while a dependency is down.
+// /livez asks: is the app alive? Failing it makes kubelet RESTART the container,
+// so it must only fail when a restart would actually help — a deadlock, not a
+// missing database.
+//
+// /readyz asks: is the app able to serve? Failing it removes the pod from Service
+// endpoints but leaves it running. This is the one that may fail temporarily:
+// during startup, or while a dependency is down.
 //
 // Getting these two backwards is a classic: a /livez that checks the database
 // turns a brief database blip into an endless restart loop across every pod.

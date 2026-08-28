@@ -29,6 +29,8 @@ import (
 
 	"github.com/slash3b/tickets/pkg/obs"
 	"go.uber.org/zap"
+
+	"go.opentelemetry.io/otel"
 )
 
 const venueName = "Cineplex Screen 1"
@@ -90,6 +92,12 @@ func run() error {
 		ordersstore.SchemaSQL, paystore.SchemaSQL); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
 	}
+
+	// A span for the whole run, so the CronJob appears in the service list at all
+	// and a failed seeding is something you can find rather than something you
+	// notice tomorrow when there is nothing to sell.
+	ctx, span := otel.Tracer("seeder").Start(ctx, "seed")
+	defer span.End()
 
 	cat := catalogstore.New(pool)
 	inv := inventorystore.New(pool)

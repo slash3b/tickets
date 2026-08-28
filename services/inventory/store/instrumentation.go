@@ -28,5 +28,12 @@ var (
 		metric.WithDescription("Retryable database conflicts during a hold"),
 		metric.WithUnit("{conflict}"))
 
+	// Holds reclaimed by the sweeper, by why. A hold released on its hard deadline
+	// rather than its TTL means something got stuck in `converting` — that is a
+	// bug signal, not routine cleanup, and separating them is the whole value.
+	swept, _ = meter.Int64Counter("tickets.holds.swept",
+		metric.WithDescription("Holds reclaimed by the sweeper"),
+		metric.WithUnit("{hold}"))
+
 	tracer = otel.Tracer("inventory")
 )

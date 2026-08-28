@@ -1,4 +1,10 @@
-// Package store owns payment records. It is the only thing that decides whether
+// Package store is the PAYMENTS service: whether money moved.
+//
+// Not a deployed process — it is compiled into gateway (which charges) and into
+// workers (whose reconciler establishes the truth about charges the bank never
+// answered for). See services/README.md for which directories are binaries.
+//
+// It owns payment records and is the only thing that decides whether
 // money moved, and it is written on the assumption that the bank may take money
 // and then say nothing.
 package store

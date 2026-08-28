@@ -1,4 +1,10 @@
-// Package store owns venues, sections, seats, events and prices.
+// Package store is the CATALOG service: what EXISTS, as opposed to what is
+// available, which is inventory's job.
+//
+// Not a deployed process — it is compiled into gateway and seeder. See
+// services/README.md for which directories are binaries and which are not.
+//
+// It owns venues, sections, seats, events and prices.
 //
 // This is the easy service on purpose. It is read-heavy, almost never written,
 // and everything it serves is cacheable — so it is where the caching lessons live
@@ -37,10 +43,10 @@ type Event struct {
 }
 
 type Seat struct {
-	ID        uuid.UUID
-	RowLabel  string
-	Number    int
-	X, Y      float64
+	ID       uuid.UUID
+	RowLabel string
+	Number   int
+	X, Y     float64
 }
 
 type Store struct{ db *pgxpool.Pool }

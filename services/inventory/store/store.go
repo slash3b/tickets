@@ -1,5 +1,12 @@
-// Package store owns seat state. It is the only writer of inventory.event_seats
-// anywhere in the system.
+// Package store is the INVENTORY service: what is AVAILABLE, as opposed to what
+// exists, which is catalog's job.
+//
+// Not a deployed process — it is compiled into gateway (which holds and commits
+// seats) and into workers (whose sweepers reclaim them). See services/README.md
+// for which directories are binaries and which are not.
+//
+// It owns seat state and is the only writer of inventory.event_seats anywhere in
+// the system.
 //
 // The whole project turns on one guarantee: N buyers, M seats, N >> M, and a seat
 // is never sold twice. Everything else is scaffolding around that sentence.

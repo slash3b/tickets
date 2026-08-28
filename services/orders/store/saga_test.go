@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
 	dsn := os.Getenv("DATABASE_URL")

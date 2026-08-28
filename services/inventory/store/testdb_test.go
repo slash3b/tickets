@@ -10,7 +10,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-
 // newTestStore connects to the database named by DATABASE_URL and applies the
 // schema. Tests SKIP rather than fail when it is unset, so `go test ./...` stays
 // green on a machine with no database — the tests that need one say so plainly

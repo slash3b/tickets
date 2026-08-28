@@ -215,10 +215,20 @@ func NewResumer(saga *Saga, s *Store, minAge time.Duration) *Resumer {
 
 // Once drives one batch forward and returns how many orders it touched.
 func (r *Resumer) Once(ctx context.Context) (int, error) {
+	// THE RESUMER IS THE FORWARD-RECOVERY MECHANISM and it works in silence: it
+	// finishes orders whose request died mid-saga. If it stops, nothing errors —
+	// orders just quietly stay unfinished. A span per pass, carrying how many were
+	// found and how many it moved, is the only way that becomes visible.
+	ctx, span := tracer.Start(ctx, "resume")
+	defer span.End()
+
 	stuck, err := r.store.InFlight(ctx, r.minAge, r.batch)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "list in-flight")
 		return 0, fmt.Errorf("list in-flight: %w", err)
 	}
+	span.SetAttributes(attribute.Int("orders.in_flight", len(stuck)))
 
 	n := 0
 	for _, o := range stuck {
@@ -236,6 +246,10 @@ func (r *Resumer) Once(ctx context.Context) (int, error) {
 			r.OnResumed(o.ID, from)
 		}
 		n++
+	}
+	span.SetAttributes(attribute.Int("orders.resumed", n))
+	if n > 0 {
+		resumed.Add(ctx, int64(n))
 	}
 	return n, nil
 }
@@ -274,5 +288,12 @@ var (
 
 	orders, _ = meter.Int64Counter("tickets.orders",
 		metric.WithDescription("Orders reaching a terminal state"),
+		metric.WithUnit("{order}"))
+
+	// Orders the resumer had to finish because their request died mid-saga. A
+	// non-zero rate here is not an error — it is the design working — but a
+	// RISING one means requests are dying more often than they used to.
+	resumed, _ = meter.Int64Counter("tickets.orders.resumed",
+		metric.WithDescription("Orders completed by the resumer rather than their own request"),
 		metric.WithUnit("{order}"))
 )

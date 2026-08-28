@@ -6,6 +6,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // SweepExpired releases holds whose short TTL has run out, returning how many.
@@ -145,15 +149,40 @@ func (w *Sweeper) Run(ctx context.Context) {
 }
 
 func (w *Sweeper) once(ctx context.Context) {
-	if _, err := w.store.SweepExpired(ctx); err != nil {
+	// A SPAN PER SWEEP. Background work is the least observable thing in any
+	// system — nobody is waiting on it, so nothing complains when it stops — and
+	// until this existed the workers process emitted no spans at all and did not
+	// appear in the service list, despite running the three loops that keep the
+	// data consistent.
+	//
+	// It records how much it actually reclaimed, which is the number that matters:
+	// a sweeper releasing zero holds forever is either idle or broken, and those
+	// look identical from outside.
+	ctx, span := tracer.Start(ctx, "sweep")
+	defer span.End()
+
+	released, err := w.store.SweepExpired(ctx)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "sweep expired")
 		w.report(fmt.Errorf("sweep expired: %w", err))
+	}
+	span.SetAttributes(attribute.Int("holds.expired", released))
+	if released > 0 {
+		swept.Add(ctx, int64(released), metric.WithAttributes(attribute.String("reason", "expired")))
 	}
 
 	ids, err := w.store.SweepHardDeadline(ctx)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "sweep hard deadline")
 		w.report(fmt.Errorf("sweep hard deadline: %w", err))
-	} else if len(ids) > 0 && w.OnHardDeadline != nil {
-		w.OnHardDeadline(ids)
+	} else if len(ids) > 0 {
+		span.SetAttributes(attribute.Int("holds.hard_deadline", len(ids)))
+		swept.Add(ctx, int64(len(ids)), metric.WithAttributes(attribute.String("reason", "hard_deadline")))
+		if w.OnHardDeadline != nil {
+			w.OnHardDeadline(ids)
+		}
 	}
 }
 

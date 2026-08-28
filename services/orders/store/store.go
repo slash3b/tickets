@@ -1,4 +1,13 @@
-// Package store owns orders and the saga log.
+// Package store is the ORDERS service: it owns orders and the saga log.
+//
+// Not a deployed process — it is compiled into gateway (which places orders) and
+// into workers (whose resumer finishes the ones whose request died). See
+// services/README.md for which directories are binaries and which are not.
+//
+// It drives an order through created -> awaiting payment -> paid -> confirmed,
+// writing the saga log BEFORE each attempt so a crash leaves evidence of what was
+// in flight. Recovery is FORWARD, never backward: an order that was paid but
+// whose confirmation was lost gets finished, not refunded.
 package store
 
 import (
