@@ -134,29 +134,23 @@ otelDeployment:
 # cluster, not per-node ones; scraping them from every node would multiply every
 # series by the node count and say nothing new.
 #
-# THE `consumers` SCRAPER IS DELIBERATELY OFF, and this is the interesting part.
+# CONSUMER LAG IS ON, AND THE THING THAT MADE IT UNSAFE IS FIXED AT THE SOURCE.
 #
-# pkg/events subscribes with a UNIQUE GROUP PER PROCESS, because this is a
-# broadcast and not a work queue: every gateway replica needs every message, and
-# a shared group would give each message to exactly one of them. That design has
-# a consequence for consumer-lag monitoring, and the consequence is that consumer
-# lag here MEANS NOTHING:
+# It was off for a day. pkg/events uses a unique group per process (broadcast,
+# not work queue), so every pod restart abandons a group, and at Kafka's 7-day
+# default offsets retention those dead groups accumulated: 29 groups and 72 lag
+# series after one day of rolling deploys, each still scraped every minute,
+# each reporting a lag that only grows because nobody is reading it.
 #
-#   - every reader starts at kafka.LastOffset, so a healthy consumer's lag is ~0
-#     by construction rather than by merit;
-#   - every pod restart abandons a group, and a dead group's "lag" grows forever,
-#     measuring only how long ago that pod died.
+# Turning the scraper off treated the symptom. deploy/data/kafka.yaml now sets
+# offsets.retention.minutes to 60, so an abandoned group disappears within the
+# hour while a live one keeps committing and stays. The cardinality is bounded by
+# the number of RUNNING consumers, which is what it should always have been.
 #
-# Measured before turning it off: 29 groups and 72 lag series, from one day of
-# rolling deploys. That is unbounded growth in ClickHouse in exchange for a number
-# that is either zero or a tombstone. This cluster has already had one incident
-# from ClickHouse ingesting its own noise; it does not need another source.
-#
-# SigNoz's Consumer Lag panel will therefore be empty. The panels that answer the
-# question this project actually has - which partition is hot during an on-sale -
-# are fed by the topics and brokers scrapers below and do work.
-#
-# To turn it back on, add `consumers` to the scrapers list. Nothing else changes.
+# WHAT THE LAG ACTUALLY MEANS HERE is still worth knowing before reading it: every
+# reader starts at kafka.LastOffset, so a healthy consumer sits at ~0 by
+# construction rather than by merit. A rising number means a consumer is falling
+# behind, which is real; a number that is simply zero proves less than it looks.
 otelDeployment:
   config:
     receivers:
@@ -169,6 +163,7 @@ otelDeployment:
         scrapers:
           - brokers
           - topics
+          - consumers
         # Slower than the 30s default would suggest is needed: offsets move
         # constantly but the questions asked of them are minutes-wide, and this
         # is a homelab with one small ClickHouse.

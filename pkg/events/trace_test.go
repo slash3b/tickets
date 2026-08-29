@@ -11,6 +11,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
 )
 
 // TestTraceCrossesTheBroker is the whole point of the header carrier: a consumer
@@ -137,4 +138,42 @@ func TestProducerSpanCarriesThePartition(t *testing.T) {
 	if spans[0].SpanKind != trace.SpanKindProducer {
 		t.Errorf("kind = %v, want producer", spans[0].SpanKind)
 	}
+}
+
+// TestTrackUnregisters guards a leak that would grow with every reconnect: a
+// Subscribe goroutine that exits must take its reader out of the metric
+// callback's list, or a restarted consumer's dead reader is polled forever.
+func TestTrackUnregisters(t *testing.T) {
+	lg := zap.NewNop()
+	r1 := kafka.NewReader(kafka.ReaderConfig{Brokers: []string{"127.0.0.1:9092"}, Topic: "a", Partition: 0})
+	r2 := kafka.NewReader(kafka.ReaderConfig{Brokers: []string{"127.0.0.1:9092"}, Topic: "b", Partition: 0})
+	t.Cleanup(func() { _ = r1.Close(); _ = r2.Close() })
+
+	before := trackedCount()
+	un1 := track(r1, "a", "g", lg)
+	un2 := track(r2, "b", "g", lg)
+	if got := trackedCount(); got != before+2 {
+		t.Fatalf("tracked = %d, want %d", got, before+2)
+	}
+
+	un1()
+	if got := trackedCount(); got != before+1 {
+		t.Fatalf("tracked = %d after one unregister, want %d", got, before+1)
+	}
+	un2()
+	if got := trackedCount(); got != before {
+		t.Fatalf("tracked = %d after both, want %d — readers are leaking", got, before)
+	}
+
+	// Unregistering twice must not remove somebody else's reader.
+	un1()
+	if got := trackedCount(); got != before {
+		t.Fatalf("a repeated unregister changed the list to %d", got)
+	}
+}
+
+func trackedCount() int {
+	trackedMu.Lock()
+	defer trackedMu.Unlock()
+	return len(tracked)
 }

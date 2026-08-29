@@ -218,6 +218,10 @@ func Subscribe(ctx context.Context, brokers []string, topics []string, groupID s
 				MaxBytes:    1 << 20,
 				MaxWait:     250 * time.Millisecond,
 			})
+			// Registered for the client-side metrics SigNoz's Kafka view wants,
+			// which no Go client can get from JMX. See pkg/events/metrics.go.
+			untrack := track(r, topic, groupID, lg)
+			defer untrack()
 			defer func() { _ = r.Close() }()
 
 			for {

@@ -110,6 +110,21 @@ spec:
       # CLOSED segments, so a 1GB default segment on a low-volume topic is never
       # closed and therefore never deleted no matter what retention.ms says. That
       # is the single most common way a small Kafka fills a disk.
+      # ABANDONED CONSUMER GROUPS MUST EXPIRE FAST, because this system creates
+      # them on purpose. pkg/events subscribes with a UNIQUE GROUP PER PROCESS so
+      # every gateway replica sees every message (broadcast, not work queue), and
+      # that means EVERY POD RESTART LEAVES A GROUP BEHIND. At the 7-day default
+      # they pile up: 29 dead groups and 72 consumer-lag series after one day of
+      # rolling deploys, each scraped every minute, each reporting a lag that only
+      # grows because nobody is reading.
+      #
+      # An hour is long enough that a live consumer never loses its position — it
+      # commits continuously while messages flow — and short enough that the dead
+      # ones are gone before they mean anything. Nothing here depends on committed
+      # offsets anyway: readers start at LastOffset and the seat map is refetched
+      # on connect.
+      offsets.retention.minutes: 60
+
       log.retention.hours: 168          # 7 days — long enough to replay a topic
       log.segment.bytes: 134217728      # 128MB, not the 1GB default
       log.retention.bytes: 2147483648   # 2GB per partition, a hard backstop
