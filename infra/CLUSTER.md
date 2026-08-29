@@ -711,6 +711,33 @@ OBSERVABILITY - SIGNOZ, INSTALLED 2026-08-24
   `inventory.seat.held publish` -> `gateway:inventory.seat.held process`, with the
   saga and the bank in the same trace.
 
+  USE THE PAGE'S OWN CONFIGURATION CHECK. The Kafka page has a
+  "Missing Configuration" button that lists every attribute it wants, per
+  producer and consumer, and marks the ones it cannot find. It named all four
+  that were wrong here and is far faster than guessing from an empty dashboard.
+  Its API is /api/v1/messaging-queues/kafka/onboarding/{producers,consumers,kafka}
+  and it needs a logged-in session, so it is a browser job.
+
+  THE FOUR IT FOUND, 2026-08-30:
+
+    messaging.destination.partition.id  was set with attribute.Int, so it landed
+      in the numeric attribute map. SigNoz reads the string map. The convention
+      says string. The attribute was present and unfindable at once.
+    messaging.destination.partition.id on PRODUCERS could not exist at all: the
+      writer is async, so WriteMessages returns before the balancer has picked a
+      partition. The span now travels in kafka.Message.WriterData and is ended by
+      the writer's Completion callback, where kafka-go has filled in Partition
+      and Offset.
+    messaging.client_id  was never set. It is the hostname.
+    service.instance.id  was missing from the RESOURCE, not the span, so it was
+      missing everywhere in the system rather than only here.
+
+  Verified after the rollout settled: 101 of 101 producer spans and 41 of 41
+  consumer spans carry the partition. MEASURE AFTER THE OLD PODS ARE GONE — a
+  first check sampled one span from a draining pod and reported the attributes
+  missing when they were already fixed. That is the third time this trap has been
+  worth writing down.
+
     VERIFY THEM BY FORCING THE FAILURE, NOT BY READING THE CODE. Two of these were
   wrong on the first deploy and looked fine in a green test suite. Set the bank to
   decline everything, buy a ticket, then check the labels:
