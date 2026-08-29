@@ -83,10 +83,18 @@ type API struct {
 	lg        *zap.Logger
 	hub       *hub
 	cache     *cache.Cache
+	admin     *Admin
 }
 
 func New(c Catalog, i Inventory, o Orders, holdTTL time.Duration, lg *zap.Logger) *API {
 	return &API{catalog: c, inventory: i, orders: o, holdTTL: holdTTL, lg: lg}
+}
+
+// WithAdmin exposes the operator endpoints. Off unless wired, so a gateway that
+// is not meant to be an operator surface simply does not serve them.
+func (a *API) WithAdmin(ad *Admin) *API {
+	a.admin = ad
+	return a
 }
 
 // WithCache turns on the Redis seat-map projection. A nil cache is fine and
@@ -121,6 +129,11 @@ func (a *API) Handler() http.Handler {
 	// a browser tab open. The interesting spans are the changes flowing through
 	// it, and those belong to inventory.
 	mux.HandleFunc("GET /api/events/{id}/stream", a.stream)
+	if a.admin != nil {
+		// Creating a showing is an OPERATOR action and lives under /api/admin so
+		// it is obvious in a log and in a route table which requests are which.
+		obs.Route(mux, a.lg, "POST /api/admin/showings", a.admin.createShowing)
+	}
 	obs.Route(mux, a.lg, "GET /api/events/{id}/sections/{sid}", a.sectionSeats)
 	obs.Route(mux, a.lg, "POST /api/holds", a.createHold)
 	obs.Route(mux, a.lg, "DELETE /api/holds/{id}", a.releaseHold)

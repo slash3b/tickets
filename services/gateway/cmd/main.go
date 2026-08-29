@@ -90,8 +90,9 @@ func run() error {
 	}
 	defer func() { _ = ordConn.Close() }()
 
+	catClient := catalog.NewClient(catConn)
 	api := gateway.New(
-		gateway.CatalogClient{C: catalog.NewClient(catConn)},
+		gateway.CatalogClient{C: catClient},
 		gateway.InventoryClient{C: inventory.NewClient(invConn)},
 		orders.NewClient(ordConn),
 		holdTTL,
@@ -138,6 +139,11 @@ func run() error {
 			})
 		lg.Info("live seat map on", zap.String("kafka", kafkaAddr), zap.String("group", groupID))
 	}
+
+	// The operator endpoints. Enabled by default here because this gateway IS the
+	// operator surface on this cluster; a deployment that should not be would
+	// leave this off rather than rely on routing to hide it.
+	api = api.WithAdmin(gateway.NewAdmin(catClient, lg))
 
 	mux := http.NewServeMux()
 	mux.Handle("/", api.Handler())

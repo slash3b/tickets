@@ -19,6 +19,9 @@ export default function Admin() {
   const [stats, setStats] = useState(null)
   const [bank, setBank] = useState({ decline_rate: 0.05, timeout_rate: 0.01 })
   const [msg, setMsg] = useState(null)
+  const [staging, setStaging] = useState(false)
+  const [staged, setStaged] = useState(null)
+  const [onSaleIn, setOnSaleIn] = useState(60)
 
   useEffect(() => {
     ;(async () => {
@@ -88,6 +91,47 @@ export default function Admin() {
     }
   }
 
+  // STAGE A SALE. Creates the showing and leaves it to go on sale on its own —
+  // the workers loop opens the seats when the moment arrives, exactly as it does
+  // for the CronJob's daily movie. There is one path that starts a sale and this
+  // does not become a second one.
+  async function stage() {
+    if (staging) return
+    setStaging(true)
+    setStaged(null)
+    try {
+      const r = await fetch('/api/admin/showings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ venue: 'arena', on_sale_in_seconds: Number(onSaleIn) }),
+      })
+      if (!r.ok) throw new Error(`stage → ${r.status}`)
+      const s = await r.json()
+      setStaged(s)
+      setMsg({ kind: 'ok', text: `${s.title} staged — ${s.seats} seats, on sale in ${onSaleIn}s` })
+
+      // Pick it up as soon as it is buyable, so Fire targets it without anyone
+      // having to hunt for the id.
+      const poll = setInterval(async () => {
+        try {
+          const rr = await fetch('/api/events')
+          const { events } = await rr.json()
+          if (events?.some((e) => e.id === s.event_id)) {
+            setEvents(events)
+            setEventID(s.event_id)
+            setMsg({ kind: 'ok', text: `${s.title} is ON SALE — ${s.seats} seats` })
+            clearInterval(poll)
+          }
+        } catch { /* keep waiting */ }
+      }, 3000)
+      setTimeout(() => clearInterval(poll), 10 * 60 * 1000)
+    } catch (e) {
+      setMsg({ kind: 'err', text: e.message })
+    } finally {
+      setStaging(false)
+    }
+  }
+
   const ev = events.find((e) => e.id === eventID)
 
   return (
@@ -103,6 +147,32 @@ export default function Admin() {
         No authentication. Anything on this page affects the real system, and
         anyone who can reach this host can click it.
       </div>
+
+      <section className="panel">
+        <h2>Stage a sale</h2>
+        <p className="hint">
+          Creates a 20,000-seat arena show that goes on sale shortly. The daily
+          movie is untouched by this — the CronJob still seeds exactly one cinema
+          showing at 03:00 and knows nothing about anything here.
+        </p>
+        <div className="controls">
+          <label>
+            on sale in (s)
+            <input type="number" min="10" max="3600" value={onSaleIn}
+                   onChange={(e) => setOnSaleIn(e.target.value)} />
+          </label>
+          <button className="action" onClick={stage} disabled={staging}>
+            {staging ? 'staging…' : 'Stage a 20,000-seat sale'}
+          </button>
+        </div>
+        {staged && (
+          <p className="hint">
+            {staged.title} · {staged.seats} seats · on sale at{' '}
+            {new Date(staged.on_sale_at).toLocaleTimeString()} — the seats open
+            themselves, then Fire below will target it.
+          </p>
+        )}
+      </section>
 
       <section className="panel">
         <h2>On-sale</h2>
