@@ -950,6 +950,23 @@ THE APPLICATION - DEPLOYED 2026-08-27
   AND kubectl exec NEEDS -i TO PIPE A FILE IN. Without it the file lands empty and
   the error you get back is about JSON parsing, a long way from the cause.
 
+  BROKER FAILURE, TESTED FOR REAL 2026-08-29. Broker 1 deleted 25 seconds into a
+  3,000-buyer on-sale. ISR went 1,2,0 -> 2,0 -> 0,1,2 within about twenty seconds,
+  writes never stopped because two in-sync replicas still satisfy
+  min.insync.replicas=2, and the burst finished with 292 bought, 2,695 lost races
+  and ZERO errors. No oversell. Six seat-change messages were dropped while the
+  broker was gone - the async publish trading a stale read model for never
+  blocking a sale, working exactly as intended and visible for the first time.
+
+  STAGING A SALE FROM THE BROWSER: POST /api/admin/showings on the gateway, or the
+  button on https://app.tickets.lan/admin. It creates the event with an on_sale_at
+  a minute or two out and does NOT open the seats - the workers on-sale loop does
+  that when the moment arrives, the same path the 03:00 CronJob's showing takes.
+  One mechanism starts a sale, and the operator page did not become a second one.
+
+  THE DAILY MOVIE IS UNAFFECTED by any of it. The seeder CronJob still creates
+  exactly one cinema showing at 03:00 and knows nothing about the arena.
+
   REDIS IS NO LONGER INERT EITHER, as of 2026-08-29. It holds the seat-map
   projection, which is exactly the job DESIGN.md gave it and nothing more.
 

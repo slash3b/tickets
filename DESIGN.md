@@ -1099,9 +1099,30 @@ MILESTONES
      RF=1, and __consumer_offsets sitting at RF=1 because Strimzi does not manage
      internal topics.
 
-     WHAT REMAINS IS THE EXPERIMENT ITSELF: kill a broker mid-on-sale and find out
-     whether producers carry on or start failing, and what the seat map does while
-     it happens. The cluster can now answer that; nothing has asked it yet.
+     THE EXPERIMENT, RUN 2026-08-29: broker 1 killed 25 seconds into a
+     3,000-buyer on-sale.
+
+       ISR: 1,2,0  ->  2,0  within ten seconds  ->  0,1,2 ten seconds later
+       bought 292, lost the race 2,695, ERRORS 0
+       no oversell
+       6 seat-change messages dropped (inventory 5, payments 1)
+
+     THE CUSTOMER SAW NOTHING. ISR shrank to two replicas, which still satisfies
+     min.insync.replicas=2, so writes never stopped — that pairing is the entire
+     reason a broker can be lost. The StatefulSet replaced the pod and the ISR was
+     whole again about twenty seconds after the kill.
+
+     THE COST LANDED EXACTLY WHERE THE DESIGN PUT IT. Publishing is async and
+     fire-and-forget so that a seat claim never waits on a broker; the price of
+     that choice is that a broker blip drops messages rather than blocking sales.
+     Six went missing, so six seats were briefly stale on the read model until the
+     next read corrected them. Losing a handful of read-model updates is a bad
+     minute; blocking every purchase behind a message broker is a broken system.
+     Both halves of that trade were visible in one run.
+
+     WHAT IS NOT YET MEASURED is the hot partition under a THREE-BROKER on-sale -
+     inventory.* on one partition against orders.* on three. The topics and the
+     brokers now exist to show it; the graph does not.
 
 Milestone 1 is deliberately unglamorous. If the seat-claim primitive is wrong, every
 milestone after it is built on sand, and it is far cheaper to find that out with a
