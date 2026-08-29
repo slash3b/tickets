@@ -172,6 +172,10 @@ func (s *Simulator) SetConfig(cfg Config) {
 	s.cfg = cfg
 }
 
+// customerKey carries this buyer's id down to the HTTP helpers, which put it on
+// the wire as the same header a browser sends.
+type customerKey struct{}
+
 // burstKey carries the rehearsal's span context so a session can LINK to it
 // without becoming part of its trace.
 type burstKey struct{}
@@ -274,8 +278,16 @@ func (s *Simulator) RunOne(ctx context.Context, profile Profile) {
 	if bs, ok := ctx.Value(burstKey{}).(trace.SpanContext); ok && bs.IsValid() {
 		opts = append(opts, trace.WithNewRoot(), trace.WithLinks(trace.Link{SpanContext: bs}))
 	}
+	// EVERY BUYER GETS AN ID, the same way a person at the seat map does. Without
+	// one, "what did this customer experience" is only answerable per-trace — and
+	// a picky buyer who holds, releases and holds again is three traces that
+	// nothing connects.
+	customer := "sim-" + string(profile) + "-" + newUUID()[:8]
+	ctx = context.WithValue(ctx, customerKey{}, customer)
+
 	ctx, span := tracer.Start(ctx, "session "+string(profile), opts...)
 	defer span.End()
+	span.SetAttributes(attribute.String("customer.id", customer))
 
 	events, err := s.listEvents(ctx)
 	if err != nil || len(events) == 0 {

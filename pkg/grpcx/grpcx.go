@@ -28,6 +28,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/slash3b/tickets/pkg/logger"
+	"github.com/slash3b/tickets/pkg/obs"
 )
 
 // NewServer builds the server every service uses.
@@ -131,6 +132,12 @@ func accessLog(lg *zap.Logger) grpc.UnaryServerInterceptor {
 		trace.SpanFromContext(ctx).SetAttributes(
 			attribute.String("rpc.grpc.status_code_name", code.String()))
 
+		// The customer id arrives on its own in baggage — the propagator has
+		// carried baggage since the first commit. This puts it on THIS service's
+		// span, so "everything customer X did" is one filter across all of them
+		// rather than a trace-by-trace hunt.
+		obs.TagCustomer(ctx)
+
 		log := logger.Ctx(ctx, lg).Info
 		if isFault(code) {
 			log = logger.Ctx(ctx, lg).Error
@@ -139,6 +146,7 @@ func accessLog(lg *zap.Logger) grpc.UnaryServerInterceptor {
 			zap.String("method", info.FullMethod),
 			zap.String("code", code.String()),
 			zap.Duration("took", time.Since(start)),
+			obs.CustomerField(ctx),
 		)
 		return resp, err
 	}

@@ -194,3 +194,20 @@ button.ghost { background: transparent; color: var(--muted); border: 1px solid v
 .action.danger:disabled { opacity: 0.5; }
 .msg.standalone { display: block; margin-top: 0.8rem; }
 .msg.warn { color: #e0b070; }
+
+/* Your own id, shown so it can be copied straight into a trace search. Quiet —
+   it is a debugging affordance, not part of buying a ticket. */
+.whoami {
+  align-self: flex-start;
+  background: none;
+  border: 1px dashed #2a2f36;
+  color: #7d858f;
+  font: inherit;
+  font-size: 0.72rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 5px;
+  cursor: pointer;
+  margin-top: 0.35rem;
+}
+.whoami code { color: #9aa3ae; font-family: ui-monospace, monospace; }
+.whoami:hover { border-color: #3c434d; color: #9aa3ae; }

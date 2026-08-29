@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { customerID, api as fetchWithID, apiJSON } from './customer.js'
 import SeatMap from './SeatMap.jsx'
 import Upcoming from './Upcoming.jsx'
 
@@ -11,6 +12,9 @@ const FALLBACK_POLL_MS = 10000
 // One id for the whole visit, so repeat purchases look like one person rather
 // than a new customer each time. crypto.randomUUID needs a secure context; the
 // Gateway also has a plain :80 listener, so fall back rather than throw there.
+// The order's user_id stays a uuid because the database column is one. The
+// customer id is the thing you filter telemetry by, and it is sent as a header on
+// every request rather than only on the ones that buy something.
 const USER_ID =
   globalThis.crypto?.randomUUID?.() ??
   '00000000-0000-4000-8000-' + Math.floor(Math.random() * 1e12).toString(16).padStart(12, '0')
@@ -33,7 +37,7 @@ export default function App() {
   useEffect(() => {
     ;(async () => {
       try {
-        const { events } = await api('/api/events')
+        const { events } = await apiJSON('/api/events')
         setEvents(events ?? [])
         if (events?.length) setEvent(events[0])
         else setMsg({ kind: 'err', text: 'Nothing on sale right now.' })
@@ -53,7 +57,7 @@ export default function App() {
     setPicked([])
     ;(async () => {
       try {
-        const { sections } = await api(`/api/events/${event.id}/sections`)
+        const { sections } = await apiJSON(`/api/events/${event.id}/sections`)
         setSections(sections ?? [])
         if (sections?.length) setSection(sections[0])
       } catch (e) {
@@ -65,7 +69,7 @@ export default function App() {
   const refresh = useCallback(async () => {
     if (!event || !section) return
     try {
-      const { seats } = await api(`/api/events/${event.id}/sections/${section.id}`)
+      const { seats } = await apiJSON(`/api/events/${event.id}/sections/${section.id}`)
       setSeats(seats ?? [])
     } catch {
       /* a failed poll is not worth shouting about; the next one will do */
@@ -156,7 +160,7 @@ export default function App() {
     busy.current = true
     setMsg(null)
     try {
-      const res = await fetch('/api/holds', {
+      const res = await fetchWithID('/api/holds', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ event_id: event.id, seat_ids: picked }),
@@ -185,7 +189,7 @@ export default function App() {
     busy.current = true
     setMsg(null)
     try {
-      const body = await api('/api/orders', {
+      const body = await apiJSON('/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -215,7 +219,7 @@ export default function App() {
 
   async function release() {
     if (!hold) return
-    await fetch(`/api/holds/${hold}`, { method: 'DELETE' }).catch(() => {})
+    await fetchWithID(`/api/holds/${hold}`, { method: 'DELETE' }).catch(() => {})
     setHold(null)
     setExpiresAt(null)
     setPicked([])
@@ -232,6 +236,13 @@ export default function App() {
         <p className="sub">
           {event ? `${event.venue} · ${new Date(event.starts_at).toLocaleString()}` : 'loading…'}
         </p>
+        <button
+          className="whoami"
+          title="Your id in the traces and logs. Click to copy — paste it into SigNoz to see everything you did."
+          onClick={() => navigator.clipboard?.writeText(customerID)}
+        >
+          you are <code>{customerID}</code>
+        </button>
       </header>
 
       {events.length > 1 && (
@@ -314,8 +325,3 @@ function priceOf(section) {
   return section?.price_minor ?? 0
 }
 
-async function api(path, init) {
-  const res = await fetch(path, init)
-  if (!res.ok) throw new Error(`${path} → ${res.status}`)
-  return res.json()
-}

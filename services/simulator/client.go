@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/slash3b/tickets/pkg/obs"
 	"io"
 	"net/http"
 )
@@ -112,6 +113,7 @@ func (s *Simulator) getJSON(ctx context.Context, path string, into any) error {
 	if err != nil {
 		return err
 	}
+	setCustomer(ctx, req)
 	resp, err := s.http.Do(req)
 	if err != nil {
 		return err
@@ -133,6 +135,7 @@ func (s *Simulator) postJSON(ctx context.Context, path string, body, into any) (
 		return 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	setCustomer(ctx, req)
 
 	resp, err := s.http.Do(req)
 	if err != nil {
@@ -152,4 +155,15 @@ func (s *Simulator) postJSON(ctx context.Context, path string, body, into any) (
 func drain(resp *http.Response) {
 	_, _ = io.Copy(io.Discard, resp.Body)
 	_ = resp.Body.Close()
+}
+
+// setCustomer puts this buyer's id on the request.
+//
+// It is the same header a browser sends, so a simulated buyer and a real one are
+// indistinguishable to everything downstream — which is the point. A load
+// generator that took a private path would stop being a client.
+func setCustomer(ctx context.Context, req *http.Request) {
+	if id, ok := ctx.Value(customerKey{}).(string); ok && id != "" {
+		req.Header.Set(obs.CustomerHeader, id)
+	}
 }

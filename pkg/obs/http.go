@@ -128,6 +128,11 @@ func access(lg *zap.Logger, route string, h http.HandlerFunc) http.Handler {
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 
+		// WHO is doing this. Seeded here at the only door into the system, and
+		// carried onward as baggage so every downstream service can tag its own
+		// spans without any of them taking a customer id as a parameter.
+		r = r.WithContext(WithCustomer(r.Context(), r))
+
 		h(rec, r)
 
 		// LEVEL BY WHO IS AT FAULT, not by whether the response was a success.
@@ -143,6 +148,7 @@ func access(lg *zap.Logger, route string, h http.HandlerFunc) http.Handler {
 			zap.String("method", r.Method),
 			zap.Int("status", rec.status),
 			zap.Duration("took", time.Since(start)),
+			CustomerField(r.Context()),
 		)
 	})
 }
