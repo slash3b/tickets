@@ -1,15 +1,26 @@
-# One showing a day. This is what keeps the system permanently doing something
-# real without anybody deciding to give it work.
+# SUSPENDED 2026-08-29. Showings are created from the operator page now.
 #
-# The standing rule for this project is one showing per day, quietly. An on-sale
-# burst is something a human triggers through the simulator's /config dial, never
-# something that happens on its own.
+# It ran at 03:00 and seeded one cinema showing a day, which kept the system doing
+# something real without anybody deciding to give it work. That stopped being what
+# was wanted: an operator who wants to watch a sale wants it to start while they
+# are looking at it, and a show that appeared overnight is one you can only ever
+# study after the fact.
+#
+# THE CRONJOB IS KEPT, NOT DELETED. suspend: true is one flag to reverse, the
+# spec is the reference for how a showing gets seeded, and scripts/wipe.sh --seed
+# reads the image from right here rather than carrying a second copy of it. A
+# suspended CronJob creates nothing and costs nothing.
+#
+# To go back to a daily showing:  suspend: false
 apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: seeder
   namespace: tickets
 spec:
+  # Nothing fires while this is true. The schedule below is kept for the day it
+  # is flipped back.
+  suspend: true
   # 03:00, so a fresh showing is on sale before anyone looks.
   schedule: "0 3 * * *"
   # If the cluster was down at 03:00, do not fire a backlog of runs at once.

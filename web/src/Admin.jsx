@@ -22,6 +22,17 @@ export default function Admin() {
   const [staging, setStaging] = useState(false)
   const [staged, setStaged] = useState(null)
   const [onSaleIn, setOnSaleIn] = useState(60)
+  const [venue, setVenue] = useState('arena')
+  const [title, setTitle] = useState('')
+  const [venueName, setVenueName] = useState('')
+  const [sections, setSections] = useState(10)
+  const [rows, setRows] = useState(50)
+  const [perRow, setPerRow] = useState(40)
+
+  // Shown live so the size of what you are about to build is never a surprise.
+  const customSeats = Number(sections) * Number(rows) * Number(perRow)
+  const presetSeats = { arena: 20000, cinema: 96 }
+  const seatCount = venue === 'custom' ? customSeats : presetSeats[venue]
 
   useEffect(() => {
     ;(async () => {
@@ -92,23 +103,38 @@ export default function Admin() {
   }
 
   // STAGE A SALE. Creates the showing and leaves it to go on sale on its own —
-  // the workers loop opens the seats when the moment arrives, exactly as it does
-  // for the CronJob's daily movie. There is one path that starts a sale and this
-  // does not become a second one.
+  // the workers loop opens the seats when the moment arrives. There is one path
+  // that starts a sale and this does not become a second one.
   async function stage() {
     if (staging) return
     setStaging(true)
     setStaged(null)
     try {
+      const body = {
+        venue,
+        on_sale_in_seconds: Number(onSaleIn),
+        ...(title.trim() && { title: title.trim() }),
+        ...(venue === 'custom' && {
+          venue_name: venueName.trim(),
+          sections: Number(sections),
+          rows: Number(rows),
+          seats_per_row: Number(perRow),
+        }),
+      }
       const r = await fetch('/api/admin/showings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ venue: 'arena', on_sale_in_seconds: Number(onSaleIn) }),
+        body: JSON.stringify(body),
       })
-      if (!r.ok) throw new Error(`stage → ${r.status}`)
+      // The server explains a rejected layout in words; showing its reason beats
+      // showing the operator a status code for something they can fix.
+      if (!r.ok) {
+        const { error } = await r.json().catch(() => ({}))
+        throw new Error(error || `stage → ${r.status}`)
+      }
       const s = await r.json()
       setStaged(s)
-      setMsg({ kind: 'ok', text: `${s.title} staged — ${s.seats} seats, on sale in ${onSaleIn}s` })
+      setMsg({ kind: 'ok', text: `${s.title} staged — ${s.seats} seats at ${s.venue}, on sale in ${onSaleIn}s` })
 
       // Pick it up as soon as it is buyable, so Fire targets it without anyone
       // having to hunt for the id.
@@ -149,25 +175,81 @@ export default function Admin() {
       </div>
 
       <section className="panel">
-        <h2>Stage a sale</h2>
+        <h2>Stage a showing</h2>
         <p className="hint">
-          Creates a 20,000-seat arena show that goes on sale shortly. The daily
-          movie is untouched by this — the CronJob still seeds exactly one cinema
-          showing at 03:00 and knows nothing about anything here.
+          Nothing creates showings on its own any more — the daily 03:00 CronJob is
+          suspended, so this page is the only way one appears. Pick a room, and the
+          seats open themselves when it goes on sale.
         </p>
         <div className="controls">
+          <label>
+            venue
+            <select value={venue} onChange={(e) => setVenue(e.target.value)}>
+              <option value="arena">Arena — 20,000 seats</option>
+              <option value="cinema">Cinema — 96 seats</option>
+              <option value="custom">Custom…</option>
+            </select>
+          </label>
+          <label>
+            title
+            <input type="text" placeholder="auto" value={title}
+                   onChange={(e) => setTitle(e.target.value)} />
+          </label>
           <label>
             on sale in (s)
             <input type="number" min="10" max="3600" value={onSaleIn}
                    onChange={(e) => setOnSaleIn(e.target.value)} />
           </label>
-          <button className="action" onClick={stage} disabled={staging}>
-            {staging ? 'staging…' : 'Stage a 20,000-seat sale'}
+        </div>
+
+        {venue === 'custom' && (
+          <>
+            <div className="controls">
+              <label>
+                venue name
+                <input type="text" placeholder={`Custom ${sections}x${rows}x${perRow}`}
+                       value={venueName} onChange={(e) => setVenueName(e.target.value)} />
+              </label>
+              <label>
+                sections
+                <input type="number" min="1" max="40" value={sections}
+                       onChange={(e) => setSections(e.target.value)} />
+              </label>
+              <label>
+                rows per section
+                <input type="number" min="1" max="500" value={rows}
+                       onChange={(e) => setRows(e.target.value)} />
+              </label>
+              <label>
+                seats per row
+                <input type="number" min="1" max="100" value={perRow}
+                       onChange={(e) => setPerRow(e.target.value)} />
+              </label>
+            </div>
+            <p className="hint">
+              One section is priced and labelled as a screen; several become tiered
+              blocks from the floor back. Leave the name blank and it is named after
+              its shape, so two different rooms never end up sharing one seating
+              chart. A name that already exists REUSES that chart, whatever the
+              numbers here say.
+            </p>
+          </>
+        )}
+
+        <div className="controls">
+          <button className="action" onClick={stage}
+                  disabled={staging || !seatCount || seatCount > 60000}>
+            {staging ? 'staging…' : `Stage a ${seatCount.toLocaleString()}-seat showing`}
           </button>
         </div>
+        {seatCount > 60000 && (
+          <p className="hint">That is {seatCount.toLocaleString()} seats. The limit is 60,000.</p>
+        )}
+
         {staged && (
           <p className="hint">
-            {staged.title} · {staged.seats} seats · on sale at{' '}
+            {staged.title} · {staged.seats} seats at {staged.venue}
+            {staged.venue_reused && ' (existing seating chart reused)'} · on sale at{' '}
             {new Date(staged.on_sale_at).toLocaleTimeString()} — the seats open
             themselves, then Fire below will target it.
           </p>
