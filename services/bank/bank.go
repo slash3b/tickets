@@ -223,8 +223,17 @@ func (b *Bank) getConfig(w http.ResponseWriter, _ *http.Request) {
 	_ = json.NewEncoder(w).Encode(b.Config())
 }
 
+// setConfig MERGES, and that is the whole point of starting from Config().
+//
+// It used to decode into a zero Config and replace everything. The operator page
+// sends only decline_rate and timeout_rate, so every nudge of a slider silently
+// set min_latency and max_latency to ZERO — deleting the 20-300ms the fake bank
+// exists to simulate. Nothing failed; payments just quietly became instant, which
+// is the least realistic thing this service can do and the hardest to notice.
+//
+// Decoding into the live config leaves absent fields exactly as they were.
 func (b *Bank) setConfig(w http.ResponseWriter, r *http.Request) {
-	var cfg Config
+	cfg := b.Config()
 	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
 		http.Error(w, "bad config", http.StatusBadRequest)
 		return
