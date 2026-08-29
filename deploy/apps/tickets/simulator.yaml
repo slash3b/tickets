@@ -52,8 +52,10 @@ spec:
             - {name: GATEWAY_URL, value: "http://gateway.tickets.svc.cluster.local"}
             - {name: ARRIVALS_PER_MINUTE, value: "2"}
           resources:
-            requests: {cpu: 10m, memory: 32Mi}
-            limits:   {memory: 96Mi}
+            # A burst holds one in-flight request per concurrent buyer. Bounded by
+            # BURST_CONCURRENCY, but the ceiling still has to fit them.
+            requests: {cpu: 10m, memory: 64Mi}
+            limits:   {memory: 256Mi}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

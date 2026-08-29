@@ -2,8 +2,11 @@ package simulator
 
 import (
 	"context"
+	"strconv"
 	"sync"
 	"time"
+
+	"github.com/slash3b/tickets/pkg/env"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -55,6 +58,17 @@ func (s *Simulator) Burst(ctx context.Context, eventID string, buyers int, over 
 	s.SetConfig(cfg)
 	defer s.SetConfig(prev)
 
+	// BOUND THE IN-FLIGHT BUYERS. The first 3,000-buyer run OOMKilled this pod:
+	// every concurrent buyer holds an HTTP request and a decoded seat map, and a
+	// 2,000-seat section is not small. Three thousand at once is also a lie about
+	// the world — a real on-sale is 3,000 separate browsers on 3,000 machines, not
+	// one process pretending. Arrivals still spread across the window; what is
+	// capped is how many are mid-purchase simultaneously, which is what costs
+	// memory and is still far more contention than the system has ever seen.
+	concurrency := s.burstConcurrency()
+	sem := make(chan struct{}, concurrency)
+	span.SetAttributes(attribute.Int("concurrency", concurrency))
+
 	var wg sync.WaitGroup
 	for i := range buyers {
 		// Spread the starts across the window instead of releasing them all on one
@@ -75,6 +89,14 @@ func (s *Simulator) Burst(ctx context.Context, eventID string, buyers int, over 
 				return
 			case <-time.After(delay):
 			}
+
+			select {
+			case <-ctx.Done():
+				return
+			case sem <- struct{}{}:
+			}
+			defer func() { <-sem }()
+
 			s.RunOne(ctx, profile)
 		}(delay, profile)
 	}
@@ -100,6 +122,18 @@ func (s *Simulator) Burst(ctx context.Context, eventID string, buyers int, over 
 		attribute.Int64("errors", res.Errors),
 	)
 	return res
+}
+
+// burstConcurrency is how many buyers may be mid-purchase at once.
+//
+// Not a config field: it is a property of how much memory this pod has, not of
+// the experiment being run, and conflating the two is how a rehearsal ends up
+// tuned to avoid a crash rather than to answer a question.
+func (s *Simulator) burstConcurrency() int {
+	if n, err := strconv.Atoi(env.Get("BURST_CONCURRENCY", "")); err == nil && n > 0 {
+		return n
+	}
+	return 250
 }
 
 type counts struct{ sessions, held, bought, lost, errors int64 }

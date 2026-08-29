@@ -51,8 +51,11 @@ spec:
             - {name: INVENTORY_ADDR, value: "inventory.tickets.svc.cluster.local:9090"}
             - {name: ORDERS_ADDR,    value: "orders.tickets.svc.cluster.local:9090"}
           resources:
-            requests: {cpu: 25m, memory: 48Mi}
-            limits:   {memory: 128Mi}
+            # SIZED FOR AN ARENA, NOT A CINEMA. A 2,000-seat section serialises to
+            # roughly twenty times what a 96-seat screen does, and the first
+            # on-sale OOMKilled this at the old cinema-era limit.
+            requests: {cpu: 25m, memory: 96Mi}
+            limits:   {memory: 384Mi}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
