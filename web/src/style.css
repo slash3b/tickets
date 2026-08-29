@@ -75,3 +75,65 @@ button.ghost { background: transparent; color: var(--muted); border: 1px solid v
   font-size: 0.9rem;
   white-space: nowrap;
 }
+
+/* Event and section pickers. The app used to assume one of each, which was true
+   until an arena with ten blocks arrived alongside the cinema. */
+.picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0 0 1rem;
+}
+.chip {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.5rem 0.85rem;
+  border-radius: 8px;
+  border: 1px solid #2a2f36;
+  background: #171a1f;
+  color: #d6dae0;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  text-align: left;
+}
+.chip small { color: #7d858f; font-size: 0.72rem; }
+.chip.on { border-color: var(--mine); background: #1b2334; color: #fff; }
+.chip:hover { border-color: #3c434d; }
+.picker.sections .chip { padding: 0.35rem 0.7rem; }
+
+/* Announced but not yet buyable. */
+.upcoming { margin: 0 0 1.25rem; }
+.upcoming h2 {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #7d858f;
+  margin: 0 0 0.5rem;
+  font-weight: 600;
+}
+.soon {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.6rem 0.85rem;
+  border: 1px dashed #333a43;
+  border-radius: 8px;
+  background: #14171b;
+}
+.soon small { display: block; color: #7d858f; font-size: 0.75rem; }
+.countdown {
+  font-variant-numeric: tabular-nums;
+  color: var(--held);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+/* An arena block is 2,000 seats. At cinema seat size that is a chart nobody can
+   see the shape of, so past a few hundred the seats shrink and the gaps close. */
+.rows.dense .seat { width: 9px; height: 9px; border-radius: 2px; }
+.rows.dense .row { gap: 2px; margin-bottom: 2px; }
+.rows.dense .rowlabel { font-size: 0.6rem; min-width: 1.6rem; }
+.rows.empty { color: #7d858f; font-size: 0.85rem; padding: 1rem 0; }

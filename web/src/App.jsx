@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import SeatMap from './SeatMap.jsx'
+import Upcoming from './Upcoming.jsx'
 
 const POLL_MS = 2000
 
@@ -9,11 +11,10 @@ const USER_ID =
   globalThis.crypto?.randomUUID?.() ??
   '00000000-0000-4000-8000-' + Math.floor(Math.random() * 1e12).toString(16).padStart(12, '0')
 
-// The map is a POLLED READ MODEL and is allowed to be stale. A seat shown as
-// free that comes back 409 is correct behaviour, not a bug — inventory is the
-// only truth, and the browser is always a moment behind it.
 export default function App() {
+  const [events, setEvents] = useState([])
   const [event, setEvent] = useState(null)
+  const [sections, setSections] = useState([])
   const [section, setSection] = useState(null)
   const [seats, setSeats] = useState([])
   const [picked, setPicked] = useState([])
@@ -23,21 +24,39 @@ export default function App() {
   const [msg, setMsg] = useState(null)
   const busy = useRef(false)
 
-  // Find the showing once.
+  // What is on sale. Was events[0] — fine when the only thing that existed was
+  // one cinema showing a day, wrong the moment an arena appeared alongside it.
   useEffect(() => {
     ;(async () => {
       try {
         const { events } = await api('/api/events')
-        if (!events?.length) return setMsg({ kind: 'err', text: 'No showing on sale right now.' })
-        const ev = events[0]
-        setEvent(ev)
-        const { sections } = await api(`/api/events/${ev.id}/sections`)
-        if (sections?.length) setSection(sections[0])
+        setEvents(events ?? [])
+        if (events?.length) setEvent(events[0])
+        else setMsg({ kind: 'err', text: 'Nothing on sale right now.' })
       } catch (e) {
         setMsg({ kind: 'err', text: `Could not reach the API: ${e.message}` })
       }
     })()
   }, [])
+
+  // Sections follow the chosen event. A cinema has one; the arena has ten, and
+  // picking between them is the difference between a seat map and a wall.
+  useEffect(() => {
+    if (!event) return
+    setSection(null)
+    setSections([])
+    setSeats([])
+    setPicked([])
+    ;(async () => {
+      try {
+        const { sections } = await api(`/api/events/${event.id}/sections`)
+        setSections(sections ?? [])
+        if (sections?.length) setSection(sections[0])
+      } catch (e) {
+        setMsg({ kind: 'err', text: e.message })
+      }
+    })()
+  }, [event])
 
   const refresh = useCallback(async () => {
     if (!event || !section) return
@@ -49,18 +68,16 @@ export default function App() {
     }
   }, [event, section])
 
-  // Poll rather than push. A WebSocket is the eventual answer, but polling is
-  // honest about what this is and needs nothing from the gateway that does not
-  // already exist.
+  // ONE SECTION AT A TIME, NEVER THE WHOLE EVENT. The arena is 20,000 seats and
+  // there is deliberately no endpoint that would return them all — at that size
+  // it is a denial of service against your own database. This is why the section
+  // picker exists rather than being a nicety.
   useEffect(() => {
     refresh()
     const t = setInterval(refresh, POLL_MS)
     return () => clearInterval(t)
   }, [refresh])
 
-  // The hold has a TTL and the sweeper WILL take the seats back. Showing the clock
-  // is honest; letting the button sit there implying the seats are still reserved
-  // is not.
   useEffect(() => {
     if (!expiresAt) return setLeft(0)
     const tick = () => {
@@ -78,27 +95,18 @@ export default function App() {
     return () => clearInterval(t)
   }, [expiresAt])
 
-  const rows = useMemo(() => {
-    const byRow = new Map()
-    for (const s of seats) {
-      if (!byRow.has(s.row)) byRow.set(s.row, [])
-      byRow.get(s.row).push(s)
-    }
-    return [...byRow.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([label, list]) => [label, list.sort((a, b) => a.number - b.number)])
-  }, [seats])
-
   const counts = useMemo(() => {
     const c = { available: 0, held: 0, sold: 0 }
     for (const s of seats) if (c[s.status] !== undefined) c[s.status]++
     return c
   }, [seats])
 
-  function toggle(seat) {
-    if (seat.status !== 'available' || hold) return
+  const pickedSet = useMemo(() => new Set(picked), [picked])
+
+  const toggle = useCallback((seat) => {
+    if (seat.status !== 'available') return
     setPicked((p) => (p.includes(seat.id) ? p.filter((x) => x !== seat.id) : [...p, seat.id]))
-  }
+  }, [])
 
   async function holdSeats() {
     if (!picked.length || busy.current) return
@@ -111,8 +119,6 @@ export default function App() {
         body: JSON.stringify({ event_id: event.id, seat_ids: picked }),
       })
       if (res.status === 409) {
-        // Someone else got there first. Show the fresh map rather than an error
-        // page — this is the single most common outcome during a busy sale.
         setMsg({ kind: 'err', text: 'Someone just took one of those. Pick again.' })
         setPicked([])
         await refresh()
@@ -143,7 +149,7 @@ export default function App() {
           hold_id: hold,
           event_id: event.id,
           user_id: USER_ID,
-          amount_minor: 1200 * picked.length,
+          amount_minor: price(event) * picked.length,
         }),
       })
       if (body.state === 'confirmed') {
@@ -151,8 +157,6 @@ export default function App() {
       } else if (body.state === 'failed') {
         setMsg({ kind: 'err', text: 'The card was declined. The seats have gone back.' })
       } else {
-        // awaiting_payment or paid — the bank has not answered yet. The saga will
-        // finish on its own; saying "failed" here would be a lie.
         setMsg({ kind: 'ok', text: `Payment is still going through (${body.state}). It will settle shortly.` })
       }
       setHold(null)
@@ -176,6 +180,8 @@ export default function App() {
     await refresh()
   }
 
+  const total = (price(event) * picked.length) / 100
+
   return (
     <div className="wrap">
       <header>
@@ -185,32 +191,48 @@ export default function App() {
         </p>
       </header>
 
+      {events.length > 1 && (
+        <nav className="picker" aria-label="On sale now">
+          {events.map((e) => (
+            <button
+              key={e.id}
+              className={`chip ${event?.id === e.id ? 'on' : ''}`}
+              onClick={() => setEvent(e)}
+            >
+              {e.title}
+              <small>{e.venue}</small>
+            </button>
+          ))}
+        </nav>
+      )}
+
+      <Upcoming />
+
+      {sections.length > 1 && (
+        <nav className="picker sections" aria-label="Sections">
+          {sections.map((s) => (
+            <button
+              key={s.id}
+              className={`chip ${section?.id === s.id ? 'on' : ''}`}
+              onClick={() => { setSection(s); setPicked([]) }}
+            >
+              {s.name}
+              <small>{s.seats} seats</small>
+            </button>
+          ))}
+        </nav>
+      )}
+
       <div className="counts">
         <div className="count"><b>{counts.available}</b><span>available</span></div>
         <div className="count"><b>{counts.held}</b><span>held</span></div>
         <div className="count"><b>{counts.sold}</b><span>sold</span></div>
-        <div className="count"><b>{seats.length}</b><span>seats</span></div>
+        <div className="count"><b>{seats.length}</b><span>in {section?.name ?? 'section'}</span></div>
       </div>
 
-      <div className="screen">screen</div>
+      <div className="screen">{event?.venue?.match(/arena/i) ? 'stage' : 'screen'}</div>
 
-      <div className="rows">
-        {rows.map(([label, list]) => (
-          <div className="row" key={label}>
-            <span className="rowlabel">{label}</span>
-            {list.map((s) => (
-              <button
-                key={s.id}
-                className={`seat ${s.status} ${picked.includes(s.id) ? 'mine' : ''}`}
-                onClick={() => toggle(s)}
-                disabled={s.status !== 'available' || !!hold}
-                title={`${s.row}${s.number} · ${s.status}`}
-                aria-label={`Seat ${s.row}${s.number}, ${s.status}`}
-              />
-            ))}
-          </div>
-        ))}
-      </div>
+      <SeatMap seats={seats} picked={pickedSet} onToggle={toggle} locked={!!hold} />
 
       <div className="legend">
         <span><i style={{ background: 'var(--available)' }} />available</span>
@@ -226,7 +248,7 @@ export default function App() {
           </button>
         ) : (
           <>
-            <button className="action" onClick={buy}>Buy · £{((1200 * picked.length) / 100).toFixed(2)}</button>
+            <button className="action" onClick={buy}>Buy · £{total.toFixed(2)}</button>
             <button className="action ghost" onClick={release}>Release</button>
             <span className="clock">{Math.floor(left / 60)}:{String(left % 60).padStart(2, '0')} left</span>
           </>
@@ -235,6 +257,13 @@ export default function App() {
       </div>
     </div>
   )
+}
+
+// The API does not serve prices yet, so this mirrors what the seeder sets. It is
+// a placeholder and says so: when catalog exposes event_prices this reads it
+// instead, and until then a wrong number here would be charged for real.
+function price(event) {
+  return event?.venue?.match(/arena/i) ? 9500 : 1200
 }
 
 async function api(path, init) {
