@@ -811,6 +811,13 @@ ACCESS LAYER - GATEWAY API, MIGRATED 2026-08-27
 THE APPLICATION - DEPLOYED 2026-08-27
 -------------------------------------
 
+  Redis has its OWN Argo application since 2026-08-29 rather than living inside
+  `data` with Postgres and Kafka. It has a different lifecycle from both - no PVC,
+  losing it costs latency and no data - and sharing a sync boundary meant the
+  safest thing in the data plane could only be touched at the pace of the
+  riskiest. Argo adopted the running pod rather than recreating it, so the split
+  cost no downtime at all.
+
   ns tickets, Argo app `tickets`, wave 5. SPLIT INTO NINE SERVICES 2026-08-28;
   before that, catalog/inventory/orders/payments were packages inside gateway and
   workers. They speak gRPC on :9090, generated from proto/tickets/v1, and each
@@ -877,6 +884,39 @@ THE APPLICATION - DEPLOYED 2026-08-27
   reconciler and the order resumer. Nothing there is unsafe concurrently, but N
   replicas do N times the work on the same rows and multiply traffic to the bank.
   strategy: Recreate is deliberate - a rolling update would briefly run two.
+
+  NODE-2 SAT AT 80%+ CPU FOR DAYS AND IT WAS NOT A SCHEDULING PROBLEM.
+  Fixed 2026-08-29. ClickHouse alone was 3106m of node-2's 3335m; everything else
+  on that node came to about 230m. Moving pods around would have achieved nothing,
+  and ClickHouse cannot move anyway - pinned off the control plane for etcd's
+  sake, and bound to node-2 by a local-path PVC.
+
+  IT WAS MERGING ITS OWN DIAGNOSTICS. 2.3 GiB of system log tables against 81 MiB
+  of real telemetry, 28 to 1, with every merge in flight belonging to a system
+  table. system.text_log alone was 1.54 GiB and the largest table in the database.
+
+  THE FIX THAT WAS ALREADY IN PLACE HAD NEVER WORKED, and the reason is the
+  lesson: config.d files load in ALPHABETICAL order and later files override
+  earlier ones. Ours was disable-system-logs.xml; the chart ships system_log.xml;
+  d sorts before s. For every table that file declares - text_log, error_log,
+  latency_log, query_metric_log - the chart silently won. trace_log, which it does
+  not declare, had stopped correctly months earlier, which is what made the
+  failure so hard to see: the fix half worked.
+
+  Renamed zz-disable-system-logs.xml so it sorts after anything the chart ships.
+
+  REMOVE=1 ONLY STOPS WRITES. Existing parts stay on disk and get merged forever,
+  so the tables were also truncated. That is a second, separate step and skipping
+  it leaves most of the CPU where it was.
+
+  metric_log went too. It had been kept on the grounds that it and query_log were
+  "both small"; once everything louder was off, it was 206 MiB and the only thing
+  still merging, seven at a time. query_log stays - it is how you find a slow
+  query and the one system table that has ever been useful here.
+
+  RESULT: node-2 83% -> 5% CPU. ClickHouse 3106m -> 140m, 5308Mi -> 3036Mi, and
+  547 MiB on disk. Ingestion unaffected: spans and logs still arriving. The three
+  nodes now sit at 2%, 2% and 5%.
 
   REDIS IS NO LONGER INERT EITHER, as of 2026-08-29. It holds the seat-map
   projection, which is exactly the job DESIGN.md gave it and nothing more.
