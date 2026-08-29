@@ -7,13 +7,13 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/slash3b/tickets/pkg/pgtest"
 	"github.com/slash3b/tickets/services/bank"
 	"github.com/slash3b/tickets/services/catalog"
 	catalogstore "github.com/slash3b/tickets/services/catalog/store"
@@ -49,10 +49,7 @@ import (
 func buildSystem(t *testing.T, bankCfg bank.Config) (*httptest.Server, *catalogstore.Store, *inventorystore.Store, *pgxpool.Pool) {
 	t.Helper()
 
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set — run `make pg-up` first")
-	}
+	dsn := pgtest.DSN(t, "gateway")
 	ctx := context.Background()
 
 	pool, err := obs.Pool(ctx, dsn)

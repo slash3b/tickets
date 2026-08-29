@@ -796,7 +796,9 @@ MILESTONES
      exactly 10 wins, 7428 attempts/sec, zero errors, under -race. Overlapping
      three-seat groups hold too.
      THE OVERSELL TEST IS MANUAL - build tag `oversell`, so `go test ./...` does
-     not compile it and it cannot run by accident. `make oversell` runs it.
+     not compile it and it cannot run by accident. Run it with
+     `go test -tags oversell ./services/inventory/...` (there is no Makefile in
+     this repo; the `make oversell` these notes used to name never existed).
      SWEEPERS DONE 2026-08-27: expiry sweeper, hard-deadline sweeper, Convert, and
      a durable released_reason so "died of a slow bank" and "died of an abandoned
      checkout" stay distinguishable. The test that matters most passes - a hold in
@@ -1283,6 +1285,43 @@ MILESTONES
      KAFKA IS DELIBERATELY NOT PURGED. Consumers use a unique group per process
      starting at kafka.LastOffset, so nothing replays old messages into a fresh
      projection, and the topics age out on their own retention.
+
+  14 the test suite stopped lying about parallelism.          DONE 2026-08-29
+     `go test ./...` failed intermittently and `go test -p 1 ./...` was green.
+     Three different packages, three different symptoms, one cause: every test
+     helper connected to the ONE database DATABASE_URL names, applied its schema
+     and truncated. Correct alone, wrong the moment two packages run at once -
+     which is the default, because go test runs packages in parallel.
+
+       --- FAIL: TestBuyATicketEndToEnd    order state "unknown", want confirmed
+       --- FAIL: TestSweepExpiredIgnoresConvertingHolds   held = 0, want 2
+       --- FAIL: TestReconcilerRecoversATimedOutCharge    panic: nil pointer
+
+     A DATABASE PER PACKAGE, in pkg/pgtest. `-p 1` in CI would also have made it
+     green, by making the suite serial forever and leaving the sharing in place
+     for the next person to rediscover. Removing the sharing is the fix; the
+     databases persist between runs because creating them is the slow part.
+
+     TWO EXPECTED ERRORS ARE HANDLED RATHER THAN AVOIDED: 42P04 duplicate_database,
+     because CREATE DATABASE has no IF NOT EXISTS and that is how you spell it; and
+     55006 object_in_use, "template1 is being accessed by other users", which is
+     precisely what six packages starting at once do to each other. The second one
+     retries.
+
+     THEN A SECOND, QUIETER ONE. Inventory still failed on the SECOND run of a
+     suite and passed on the first. Its helper gave each test its own event id and
+     truncated nothing, on the grounds that per-event isolation was enough. It is
+     not: SweepExpired is GLOBAL and returns how many seats it reclaimed, so an
+     expired hold left by a previous RUN gets counted and the assertion reads
+     `swept 6 seats, want 2`. Green on a fresh database, red on a re-run, and
+     nothing in the diff explains it.
+
+     PER-ENTITY IDS DO NOT ISOLATE A GLOBAL SWEEP. The sweeper and the payments
+     reconciler both exist to process EVERYTHING unresolved; any test asserting on
+     their totals has to own the table. Payments had already learned this and
+     truncated; inventory had not.
+
+     Verified: nine consecutive full runs at default parallelism, green.
 
 Milestone 1 is deliberately unglamorous. If the seat-claim primitive is wrong, every
 milestone after it is built on sand, and it is far cheaper to find that out with a

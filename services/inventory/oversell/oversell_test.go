@@ -2,7 +2,7 @@
 
 // MANUALLY TRIGGERED ONLY — same rule as the store-level oversell test.
 //
-//	make oversell
+//	go test -tags oversell ./services/inventory/...
 //
 // THIS ONE GOES THROUGH gRPC. The original fires a thousand goroutines directly
 // at the store, which is where the guarantee actually lives and is the right
@@ -20,8 +20,8 @@ package oversell
 import (
 	"context"
 	"errors"
+	"github.com/slash3b/tickets/pkg/pgtest"
 	"net"
-	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -46,10 +46,7 @@ func TestNoOversellThroughGRPC(t *testing.T) {
 		attempts  = 1000
 	)
 
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set — run `make pg-up` first")
-	}
+	dsn := pgtest.DSN(t, "oversell")
 	ctx := context.Background()
 
 	pool, err := obs.Pool(ctx, dsn)

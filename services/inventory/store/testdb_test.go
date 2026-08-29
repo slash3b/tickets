@@ -2,27 +2,22 @@ package store
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/slash3b/tickets/pkg/pgtest"
 )
 
-// newTestStore connects to the database named by DATABASE_URL and applies the
-// schema. Tests SKIP rather than fail when it is unset, so `go test ./...` stays
-// green on a machine with no database — the tests that need one say so plainly
-// instead of failing for a reason unrelated to the code.
-//
-//	make pg-up   starts a throwaway Postgres and prints the URL
+// newTestStore applies the schema to THIS PACKAGE'S OWN database and returns a
+// store for it. See pkg/pgtest for why the database is per-package rather than
+// the one DATABASE_URL names directly.
 func newTestStore(t *testing.T) (*Store, uuid.UUID) {
 	t.Helper()
 
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set — run `make pg-up` first")
-	}
+	dsn := pgtest.DSN(t, "inventory")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -37,10 +32,27 @@ func newTestStore(t *testing.T) (*Store, uuid.UUID) {
 	if _, err := pool.Exec(ctx, SchemaSQL); err != nil {
 		t.Fatalf("apply schema: %v", err)
 	}
+	// A PER-TEST EVENT ID IS NOT ENOUGH, because the sweeper is GLOBAL. SweepExpired
+	// reclaims every expired hold in the table and returns how many seats it
+	// touched — that is what it is for — so an expired hold left by another test,
+	// or by a previous RUN of this package against the same database, is counted
+	// here and the assertion reads `swept 6 seats, want 2`.
+	//
+	// It fails intermittently, which is the worst version: green on a fresh
+	// database, red on the second run, and the difference is invisible in the
+	// diff. Same shape as the payments reconciler, and the same honest fix.
+	for _, q := range []string{
+		`TRUNCATE inventory.holds CASCADE`,
+		`TRUNCATE inventory.event_seats`,
+	} {
+		if _, err := pool.Exec(ctx, q); err != nil {
+			t.Fatalf("truncate: %v", err)
+		}
+	}
 	t.Cleanup(pool.Close)
 
-	// Every test gets its own event id, so tests never collide and nothing has to
-	// be torn down between them.
+	// Each test still gets its own event id, so seats seeded by one are invisible
+	// to the per-event assertions of another.
 	return New(pool), uuid.New()
 }
 

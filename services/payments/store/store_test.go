@@ -3,12 +3,13 @@ package store
 import (
 	"context"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/slash3b/tickets/pkg/pgtest"
 	"github.com/slash3b/tickets/services/bank"
 	"github.com/slash3b/tickets/services/payments/bankclient"
 )
@@ -16,10 +17,7 @@ import (
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
 
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set — run `make pg-up` first")
-	}
+	dsn := pgtest.DSN(t, "payments")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
