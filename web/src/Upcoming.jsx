@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { api } from './customer.js'
 
 // Events that exist but cannot be bought yet.
 //
@@ -14,7 +15,12 @@ export default function Upcoming() {
     let alive = true
     const load = async () => {
       try {
-        const res = await fetch('/api/events/upcoming')
+        // Through the wrapper, like every other request the shop makes. This was
+        // the one call still using bare fetch, so it was the one call arriving
+        // without X-Customer-Id — which is exactly the hole the wrapper exists to
+        // close, and it is invisible until you filter a trace by customer and
+        // find a gap.
+        const res = await api('/api/events/upcoming')
         if (!res.ok) return
         const { events } = await res.json()
         if (alive) setEvents(events ?? [])

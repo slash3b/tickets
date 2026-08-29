@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 // The operator's page.
 //
@@ -9,6 +9,11 @@ import { useCallback, useEffect, useState } from 'react'
 // THERE IS NO AUTH. Nothing in this system has any, which is consistent and fine
 // on a LAN — but it means this page is a load weapon reachable by anyone who can
 // reach the host, and that is the reason it should never be routed from outside.
+// What the bank runs at when nobody is experimenting: a realistic decline rate
+// and the occasional lost answer. Named because it is both the initial state and
+// what "Reset to tame" means.
+const TAME = { decline_rate: 0.05, timeout_rate: 0.01 }
+
 export default function Admin() {
   const [events, setEvents] = useState([])
   const [eventID, setEventID] = useState('')
@@ -17,7 +22,9 @@ export default function Admin() {
   const [firing, setFiring] = useState(false)
   const [result, setResult] = useState(null)
   const [stats, setStats] = useState(null)
-  const [bank, setBank] = useState({ decline_rate: 0.05, timeout_rate: 0.01 })
+  const [bank, setBank] = useState(TAME)
+  // The slider's live value, read by the commit below. See the note there.
+  const pending = useRef(TAME)
   const [msg, setMsg] = useState(null)
   const [staging, setStaging] = useState(false)
   const [staged, setStaged] = useState(null)
@@ -43,6 +50,25 @@ export default function Admin() {
         if (events?.length) setEventID(events[0].id)
       } catch (e) {
         setMsg({ kind: 'err', text: `could not list events: ${e.message}` })
+      }
+    })()
+  }, [])
+
+  // THE SLIDERS USED TO BE WRITE-ONLY. They rendered whatever this component's
+  // initial state said, so after a reload the page claimed a tame 5% while the
+  // bank might have been declining everything — which is exactly the situation
+  // you open this page to find out about.
+  useEffect(() => {
+    ;(async () => {
+      try {
+        const r = await fetch('/admin/bank/config')
+        if (r.ok) {
+          const live = await r.json()
+          pending.current = live
+          setBank(live)
+        }
+      } catch {
+        /* the bank being unreachable is its own visible problem elsewhere */
       }
     })()
   }, [])
@@ -86,6 +112,21 @@ export default function Admin() {
       setFiring(false)
     }
   }
+
+  // A DRAG IS ONE DECISION, NOT TWENTY. onChange fires per input event for a
+  // range, so dragging decline_rate from 0 to 1 used to send about twenty PUTs,
+  // each of them a real config change on a running system. The slider now moves
+  // locally and commits once, when it is let go.
+  //
+  // THE COMMIT READS A REF, NOT THE RENDERED VALUE. Handing setBankConfig the
+  // `bank` a handler closed over risks sending the value from the render before
+  // the last drag event, which would leave the page showing one number and the
+  // bank holding another — the exact bug the GET above exists to fix.
+  function slide(next) {
+    pending.current = next
+    setBank(next)
+  }
+  const commit = () => setBankConfig(pending.current)
 
   async function setBankConfig(next) {
     setBank(next)
@@ -324,15 +365,19 @@ export default function Admin() {
           <label>
             decline rate: {(bank.decline_rate * 100).toFixed(0)}%
             <input type="range" min="0" max="1" step="0.05" value={bank.decline_rate}
-                   onChange={(e) => setBankConfig({ ...bank, decline_rate: Number(e.target.value) })} />
+                   onChange={(e) => slide({ ...bank, decline_rate: Number(e.target.value) })}
+                   onPointerUp={commit}
+                   onKeyUp={commit} />
           </label>
           <label>
             timeout rate: {(bank.timeout_rate * 100).toFixed(0)}%
             <input type="range" min="0" max="1" step="0.05" value={bank.timeout_rate}
-                   onChange={(e) => setBankConfig({ ...bank, timeout_rate: Number(e.target.value) })} />
+                   onChange={(e) => slide({ ...bank, timeout_rate: Number(e.target.value) })}
+                   onPointerUp={() => setBankConfig(bank)}
+                   onKeyUp={() => setBankConfig(bank)} />
           </label>
           <button className="action ghost"
-                  onClick={() => setBankConfig({ decline_rate: 0.05, timeout_rate: 0.01 })}>
+                  onClick={() => { pending.current = TAME; setBankConfig(TAME) }}>
             Reset to tame
           </button>
         </div>

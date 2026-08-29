@@ -30,6 +30,7 @@ export default function App() {
   const [expiresAt, setExpiresAt] = useState(null)
   const [left, setLeft] = useState(0)
   const [msg, setMsg] = useState(null)
+  const [copied, setCopied] = useState(false)
   const busy = useRef(false)
 
   // What is on sale. Was events[0] — fine when the only thing that existed was
@@ -229,6 +230,42 @@ export default function App() {
 
   const total = (priceOf(section) * picked.length) / 100
 
+  // COPYING CANNOT ASSUME navigator.clipboard EXISTS. It is undefined outside a
+  // secure context, and the gateway still has a plain :80 listener — so on
+  // http://app.tickets.lan this button used to do nothing at all, silently, with
+  // no way to tell that from a copy that worked.
+  //
+  // The fallback is the old execCommand path: a throwaway textarea, selected and
+  // copied. Deprecated, and the only thing that works where the modern API is not
+  // exposed. Either way the label says what happened.
+  async function copyID() {
+    let ok = false
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(customerID)
+        ok = true
+      } else {
+        const ta = document.createElement('textarea')
+        ta.value = customerID
+        ta.setAttribute('readonly', '')
+        ta.style.position = 'fixed'
+        ta.style.opacity = '0'
+        document.body.appendChild(ta)
+        ta.select()
+        ok = document.execCommand('copy')
+        document.body.removeChild(ta)
+      }
+    } catch {
+      ok = false
+    }
+    if (ok) {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } else {
+      setMsg({ kind: 'err', text: `Could not copy. Your id is ${customerID}` })
+    }
+  }
+
   return (
     <div className="wrap">
       <header>
@@ -240,9 +277,9 @@ export default function App() {
           <button
             className="whoami"
             title="Your id in the traces and logs. Click to copy — paste it into SigNoz to see everything you did."
-            onClick={() => navigator.clipboard?.writeText(customerID)}
+            onClick={copyID}
           >
-            you are <code>{customerID}</code>
+            {copied ? 'copied ' : 'you are '}<code>{customerID}</code>
           </button>
           <a className="oplink" href="/admin">operator →</a>
         </div>
@@ -300,9 +337,16 @@ export default function App() {
 
       <div className="bar">
         {!hold ? (
-          <button className="action" onClick={holdSeats} disabled={!picked.length}>
-            {picked.length ? `Hold ${picked.length} seat${picked.length > 1 ? 's' : ''}` : 'Pick a seat'}
-          </button>
+          <>
+            {/* A BUTTON SAYS WHAT IT DOES. This one used to read "Pick a seat"
+                while disabled, so the only control in the bar was a greyed-out
+                instruction — which reads as broken rather than as waiting. The
+                label is now stable and the instruction is a sentence beside it. */}
+            <button className="action" onClick={holdSeats} disabled={!picked.length}>
+              {picked.length ? `Hold ${picked.length} seat${picked.length > 1 ? 's' : ''}` : 'Hold seats'}
+            </button>
+            {!picked.length && <span className="prompt">Pick a seat on the map to start.</span>}
+          </>
         ) : (
           <>
             <button className="action" onClick={buy} disabled={!priceOf(section)}>

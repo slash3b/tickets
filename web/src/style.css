@@ -1,21 +1,49 @@
+/* Light theme.
+ *
+ * The dark palette this replaces was the same layout, and the layout is not what
+ * changed — every class, size and spacing below is the one that was here before.
+ * What changed is which end of the scale the page sits at.
+ *
+ * TWO THINGS GET HARDER ON WHITE AND BOTH ARE THE SEAT MAP.
+ *
+ * `sold` used to be a dark grey that read as "filled in". On white the inert
+ * colour is the LIGHT one, so sold seats are now the palest thing in the chart
+ * and available seats are the saturated ones. Inverting that would have made a
+ * sold-out block the loudest object on the page.
+ *
+ * `held` and `available` have to stay apart at 9px, which is the size an arena
+ * block renders at. Amber against green survives that; two greens would not.
+ */
 :root {
-  --bg: #0f1216;
-  --panel: #171b21;
-  --line: #262c34;
-  --ink: #e6e9ed;
-  --muted: #8b949e;
-  --available: #2f6f4f;
-  --available-hi: #3d8f66;
-  --held: #8a6d1f;
-  --sold: #3a3f46;
-  --mine: #4b6bd6;
-  --accent: #6aa9ff;
+  --bg: #ffffff;
+  --panel: #f8f9fa;
+  --line: #e3e6ea;
+  --line-strong: #cdd2d8;
+  --ink: #16191d;
+  --muted: #656e78;
+
+  --available: #2f7d54;
+  --available-hi: #256444;
+  --held: #b06a12;
+  --sold: #dfe3e8;
+  --mine: #1f5fd0;
+  /* A ring darker than the fill. In the dark theme the picked seat was a blue
+     fill with a LIGHTER blue outline; on white the same trick has to go the other
+     way, and --mine and --accent being one colour would have made the ring
+     invisible. */
+  --mine-ring: #12327a;
+  --accent: #1f5fd0;
+  --accent-ink: #ffffff;
+
+  --err: #b3261e;
+  --ok: #1c6b41;
 }
 
 * { box-sizing: border-box; }
 body {
   margin: 0; background: var(--bg); color: var(--ink);
   font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 .wrap { max-width: 940px; margin: 0 auto; padding: 28px 20px 64px; }
 
@@ -29,7 +57,7 @@ h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -0.01em; }
 
 .screen {
   text-align: center; color: var(--muted); font-size: 11px; letter-spacing: .3em;
-  text-transform: uppercase; border-bottom: 2px solid var(--line);
+  text-transform: uppercase; border-bottom: 2px solid var(--line-strong);
   padding-bottom: 8px; margin-bottom: 26px;
 }
 
@@ -37,19 +65,33 @@ h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -0.01em; }
 .row { display: flex; gap: 7px; align-items: center; }
 .rowlabel { width: 18px; color: var(--muted); font-size: 11px; text-align: right; }
 
+/* The only transition left on the page, and it is 120ms of colour. A seat that
+ * snapped between states looked like a rendering bug during an on-sale; a seat
+ * that lifts and animates on hover is decoration on a control you click 20 times
+ * in a row. */
 .seat {
   width: 26px; height: 26px; border-radius: 5px; border: none; padding: 0;
-  background: var(--sold); cursor: default; transition: transform .08s, background .15s;
+  background: var(--sold); cursor: default; transition: background-color .12s;
 }
 .seat.available { background: var(--available); cursor: pointer; }
-.seat.available:hover { background: var(--available-hi); transform: translateY(-2px); }
+.seat.available:hover { background: var(--available-hi); }
 .seat.held { background: var(--held); }
 .seat.sold { background: var(--sold); }
-.seat.mine { background: var(--mine); outline: 2px solid var(--accent); outline-offset: 1px; }
+.seat.mine { background: var(--mine); outline: 2px solid var(--mine-ring); outline-offset: 1px; }
 .seat:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+
 .legend { display: flex; gap: 16px; margin: 26px 0 0; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
-.legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; vertical-align: -1px; margin-right: 6px; }
+.legend i {
+  width: 12px; height: 12px; border-radius: 3px; display: inline-block;
+  vertical-align: -1px; margin-right: 6px;
+  /* Sold is nearly the page colour, so its swatch needs an edge or the legend
+     shows an empty gap next to the word. */
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .08);
+}
 
 .bar {
   position: sticky; bottom: 0; margin-top: 28px; background: var(--panel);
@@ -57,15 +99,23 @@ h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -0.01em; }
   display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
 }
 button.action {
-  background: var(--accent); color: #0b1020; border: none; border-radius: 7px;
-  padding: 9px 16px; font-weight: 600; cursor: pointer; font-size: 14px;
+  background: var(--accent); color: var(--accent-ink); border: 1px solid transparent;
+  border-radius: 7px; padding: 9px 16px; font-weight: 600; cursor: pointer; font-size: 14px;
 }
 button.action:disabled { background: var(--line); color: var(--muted); cursor: default; }
-button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+button.ghost {
+  background: transparent; color: var(--ink); border: 1px solid var(--line-strong);
+  font-weight: 500;
+}
+button.ghost:hover { border-color: var(--muted); }
+
+/* The instruction that used to be the disabled button's label. A button says
+   what it does; what to do first is a sentence. */
+.prompt { color: var(--muted); font-size: 13px; }
 
 .msg { font-size: 13px; }
-.msg.err { color: #ff8f7a; }
-.msg.ok { color: #6ee7a8; }
+.msg.err { color: var(--err); }
+.msg.ok { color: var(--ok); }
 
 /* The hold countdown. Tabular figures so the seconds do not jitter the layout
    as they tick down. */
@@ -90,17 +140,18 @@ button.ghost { background: transparent; color: var(--muted); border: 1px solid v
   gap: 0.15rem;
   padding: 0.5rem 0.85rem;
   border-radius: 8px;
-  border: 1px solid #2a2f36;
-  background: #171a1f;
-  color: #d6dae0;
+  border: 1px solid var(--line-strong);
+  background: var(--bg);
+  color: var(--ink);
   font: inherit;
   font-size: 0.85rem;
   cursor: pointer;
   text-align: left;
 }
-.chip small { color: #7d858f; font-size: 0.72rem; }
-.chip.on { border-color: var(--mine); background: #1b2334; color: #fff; }
-.chip:hover { border-color: #3c434d; }
+.chip small { color: var(--muted); font-size: 0.72rem; }
+.chip.on { border-color: var(--mine); background: #eaf0fc; color: var(--mine); }
+.chip.on small { color: var(--mine); }
+.chip:hover { border-color: var(--muted); }
 .picker.sections .chip { padding: 0.35rem 0.7rem; }
 
 /* Announced but not yet buyable. */
@@ -109,7 +160,7 @@ button.ghost { background: transparent; color: var(--muted); border: 1px solid v
   font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #7d858f;
+  color: var(--muted);
   margin: 0 0 0.5rem;
   font-weight: 600;
 }
@@ -119,11 +170,11 @@ button.ghost { background: transparent; color: var(--muted); border: 1px solid v
   justify-content: space-between;
   gap: 1rem;
   padding: 0.6rem 0.85rem;
-  border: 1px dashed #333a43;
+  border: 1px dashed var(--line-strong);
   border-radius: 8px;
-  background: #14171b;
+  background: var(--panel);
 }
-.soon small { display: block; color: #7d858f; font-size: 0.75rem; }
+.soon small { display: block; color: var(--muted); font-size: 0.75rem; }
 .countdown {
   font-variant-numeric: tabular-nums;
   color: var(--held);
@@ -136,36 +187,36 @@ button.ghost { background: transparent; color: var(--muted); border: 1px solid v
 .rows.dense .seat { width: 9px; height: 9px; border-radius: 2px; }
 .rows.dense .row { gap: 2px; margin-bottom: 2px; }
 .rows.dense .rowlabel { font-size: 0.6rem; min-width: 1.6rem; }
-.rows.empty { color: #7d858f; font-size: 0.85rem; padding: 1rem 0; }
+.rows.empty { color: var(--muted); font-size: 0.85rem; padding: 1rem 0; }
 
 /* The operator page. Visibly not the shop — a different accent and a banner, so
    there is no chance of thinking you are on the customer side. */
-.admin h1 { color: #d98a3b; }
-.admin .sub a { color: #6e8bd6; }
+.admin h1 { color: #9a5510; }
+.admin .sub a { color: var(--accent); }
 .warn-banner {
-  border: 1px solid #6b4a1e;
-  background: #241a0e;
-  color: #e0b070;
+  border: 1px solid #e6c489;
+  background: #fdf6e8;
+  color: #7a4d0c;
   padding: 0.6rem 0.85rem;
   border-radius: 8px;
   font-size: 0.85rem;
   margin: 0 0 1.25rem;
 }
 .panel {
-  border: 1px solid #262b32;
+  border: 1px solid var(--line);
   border-radius: 10px;
   padding: 1rem 1.1rem;
   margin: 0 0 1.1rem;
-  background: #131619;
+  background: var(--panel);
 }
 .panel h2 {
   margin: 0 0 0.4rem;
   font-size: 0.8rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #8b939d;
+  color: var(--muted);
 }
-.hint { color: #7d858f; font-size: 0.82rem; margin: 0 0 0.8rem; line-height: 1.5; }
+.hint { color: var(--muted); font-size: 0.82rem; margin: 0 0 0.8rem; line-height: 1.5; }
 .controls {
   display: flex;
   flex-wrap: wrap;
@@ -177,23 +228,23 @@ button.ghost { background: transparent; color: var(--muted); border: 1px solid v
   flex-direction: column;
   gap: 0.3rem;
   font-size: 0.78rem;
-  color: #8b939d;
+  color: var(--muted);
 }
 .controls input, .controls select {
-  background: #0e1114;
-  border: 1px solid #2a2f36;
-  color: #d6dae0;
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  color: var(--ink);
   border-radius: 6px;
   padding: 0.4rem 0.55rem;
   font: inherit;
   font-size: 0.85rem;
   min-width: 7rem;
 }
-.controls input[type="range"] { min-width: 11rem; padding: 0; }
-.action.danger { background: #7a2f2f; border-color: #933a3a; }
-.action.danger:disabled { opacity: 0.5; }
+.controls input[type="range"] { min-width: 11rem; padding: 0; border: none; background: none; }
+.action.danger { background: #a3302a; color: #fff; }
+.action.danger:disabled { background: var(--line); color: var(--muted); }
 .msg.standalone { display: block; margin-top: 0.8rem; }
-.msg.warn { color: #e0b070; }
+.msg.warn { color: #8a5a0b; }
 
 /* Your own id, shown so it can be copied straight into a trace search. Quiet —
    it is a debugging affordance, not part of buying a ticket. */
@@ -202,18 +253,18 @@ button.ghost { background: transparent; color: var(--muted); border: 1px solid v
 /* The operator page is one click away, but styled to be the quietest thing in
    the header - it is not part of buying a ticket. */
 .oplink {
-  color: #7d858f;
+  color: var(--muted);
   font-size: 0.72rem;
   text-decoration: none;
-  border-bottom: 1px dotted #2a2f36;
+  border-bottom: 1px dotted var(--line-strong);
   margin-top: 0.35rem;
 }
-.oplink:hover { color: #9aa3ae; border-bottom-color: #3c434d; }
+.oplink:hover { color: var(--ink); border-bottom-color: var(--muted); }
 
 .whoami {
   background: none;
-  border: 1px dashed #2a2f36;
-  color: #7d858f;
+  border: 1px dashed var(--line-strong);
+  color: var(--muted);
   font: inherit;
   font-size: 0.72rem;
   padding: 0.2rem 0.5rem;
@@ -221,5 +272,5 @@ button.ghost { background: transparent; color: var(--muted); border: 1px solid v
   cursor: pointer;
   margin-top: 0.35rem;
 }
-.whoami code { color: #9aa3ae; font-family: ui-monospace, monospace; }
-.whoami:hover { border-color: #3c434d; color: #9aa3ae; }
+.whoami code { color: var(--ink); font-family: ui-monospace, monospace; }
+.whoami:hover { border-color: var(--muted); color: var(--ink); }

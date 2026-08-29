@@ -102,6 +102,19 @@ func (b *Bank) SetConfig(cfg Config) {
 	b.cfg = cfg
 }
 
+// Config reports the settings currently in force.
+//
+// THE OPERATOR PAGE NEEDS THIS TO STOP LYING. Its sliders were write-only: they
+// rendered whatever the browser had last set, which after a reload is the
+// hardcoded default, so the page could show a tame 5% while the bank was
+// declining everything. A control that reports a number it never read is worse
+// than no control.
+func (b *Bank) Config() Config {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.cfg
+}
+
 // ChargeCount reports how many distinct charges exist. Tests assert on this: a
 // retried timeout must not increase it.
 func (b *Bank) ChargeCount() int {
@@ -127,6 +140,7 @@ func (b *Bank) Handler() http.Handler {
 	}
 	obs.Route(mux, lg, "POST /authorize", b.authorize)
 	mux.HandleFunc("PUT /config", b.setConfig)
+	mux.HandleFunc("GET /config", b.getConfig)
 	mux.HandleFunc("GET /charges/{key}", b.lookup)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -202,6 +216,11 @@ func (b *Bank) lookup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, charge)
+}
+
+func (b *Bank) getConfig(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(b.Config())
 }
 
 func (b *Bank) setConfig(w http.ResponseWriter, r *http.Request) {
