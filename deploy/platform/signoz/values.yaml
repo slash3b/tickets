@@ -104,6 +104,15 @@ clickhouse:
              system table that has ever been useful here. -->
         <metric_log remove="1"/>
 
+        <!-- FOUND STILL GROWING after the first sweep, on a later look:
+             aggregated_zookeeper_log had put back 1.17 MILLION rows in four
+             hours, and background_schedule_pool_log was writing again. The first
+             list caught zookeeper_log and missed its aggregated sibling, which is
+             a different table with a different config key. Truncating without
+             disabling only buys a few hours. -->
+        <aggregated_zookeeper_log remove="1"/>
+        <background_schedule_pool_log remove="1"/>
+
         <!-- Newer tables the original list predates. aggregated_zookeeper_log
              had 6.3 MILLION rows, which is a lot of bookkeeping about
              bookkeeping for a single-replica ClickHouse. -->

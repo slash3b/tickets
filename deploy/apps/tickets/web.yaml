@@ -11,6 +11,11 @@ metadata:
   namespace: tickets
   labels: {app: web}
 spec:
+  # Kubernetes keeps TEN old ReplicaSets per Deployment by default. After a
+  # day of frequent deploys this cluster had 139 of them sitting at zero —
+  # harmless individually, but they are etcd objects and they bury the one
+  # ReplicaSet that matters when you are reading `kubectl get rs` in a hurry.
+  revisionHistoryLimit: 3
   replicas: 1
   selector:
     matchLabels: {app: web}
