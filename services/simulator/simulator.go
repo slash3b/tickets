@@ -55,6 +55,10 @@ type Config struct {
 	ArrivalsPerMinute float64             `json:"arrivals_per_minute"`
 	Mix               map[Profile]float64 `json:"mix"`
 	GroupSize         int                 `json:"group_size"`
+
+	// TargetEventID pins every session to one event. Empty means wander, which is
+	// what steady traffic should do.
+	TargetEventID string `json:"target_event_id,omitempty"`
 }
 
 // DefaultConfig paces one showing's 96 seats across a whole DAY, while keeping
@@ -158,6 +162,12 @@ func (s *Simulator) SetConfig(cfg Config) {
 	s.cfg = cfg
 }
 
+func (s *Simulator) target() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.cfg.TargetEventID
+}
+
 func (s *Simulator) config() Config {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -245,6 +255,25 @@ func (s *Simulator) RunOne(ctx context.Context, profile Profile) {
 		return
 	}
 	event := events[s.intn(len(events))]
+
+	// An on-sale storms ONE event. Steady traffic wanders across whatever is
+	// selling; a burst does not, and the difference is the entire experiment —
+	// contention only happens when everybody wants the same thing at once.
+	if target := s.target(); target != "" {
+		var ok bool
+		for _, e := range events {
+			if e.ID == target {
+				event, ok = e, true
+				break
+			}
+		}
+		if !ok {
+			// The target is not on sale yet, or already gone. Not an error: during
+			// an on-sale rehearsal most arrivals land before the doors open, and
+			// counting those as failures would drown the real ones.
+			return
+		}
+	}
 
 	sections, err := s.sections(ctx, event.ID)
 	if err != nil || len(sections) == 0 {

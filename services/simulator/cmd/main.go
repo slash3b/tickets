@@ -100,6 +100,52 @@ func run() error {
 		lg.Warn("load changed by request", zap.Float64("arrivals_per_minute", c.ArrivalsPerMinute))
 		w.WriteHeader(http.StatusNoContent)
 	})
+	// THE ON-SALE. Triggered by hand, never by a schedule — this is the one thing
+	// in the system that is supposed to hurt, and it should only ever happen
+	// because somebody decided to watch it:
+	//
+	//   curl -X POST https://sim.tickets.lan/onsale \
+	//        -d '{"event_id":"...","buyers":2000,"over_seconds":20}'
+	//
+	// It blocks until the last buyer is done and answers with what happened, so
+	// the result is a measurement rather than a thing to go and look up.
+	mux.HandleFunc("POST /onsale", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			EventID     string  `json:"event_id"`
+			Buyers      int     `json:"buyers"`
+			OverSeconds float64 `json:"over_seconds"`
+			GroupShare  float64 `json:"group_share"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.EventID == "" {
+			http.Error(w, "event_id is required", http.StatusBadRequest)
+			return
+		}
+		if req.Buyers <= 0 {
+			req.Buyers = 500
+		}
+		if req.OverSeconds <= 0 {
+			req.OverSeconds = 10
+		}
+		if req.GroupShare <= 0 {
+			req.GroupShare = 0.25
+		}
+
+		lg.Warn("ON-SALE STARTING — this is meant to hurt",
+			zap.String("event_id", req.EventID),
+			zap.Int("buyers", req.Buyers),
+			zap.Float64("over_seconds", req.OverSeconds))
+
+		res := sim.Burst(r.Context(), req.EventID, req.Buyers,
+			time.Duration(req.OverSeconds*float64(time.Second)), req.GroupShare)
+
+		lg.Warn("ON-SALE DONE",
+			zap.Int64("bought", res.Bought), zap.Int64("lost_race", res.LostRace),
+			zap.Int64("errors", res.Errors), zap.String("took", res.Took))
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(res)
+	})
+
 	mux.HandleFunc("GET /stats", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]int64{
