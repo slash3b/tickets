@@ -578,6 +578,41 @@ OBSERVABILITY - SIGNOZ, INSTALLED 2026-08-24
   but has no points, which is correct - nothing has deadlocked yet, and an OTel
   counter reports nothing until its first Add.
 
+  OBSERVABILITY AUDIT 2026-08-29, deliberate traffic across every route and error
+  class. Two defects found that nothing else would have surfaced:
+
+  1. THE SWEEP HAD GONE SILENT. Its span, its tickets.holds.swept counter and its
+     hard-deadline warning were written into store.Sweeper when the loop ran
+     inside the workers binary. The split moved the timer to workers and gave the
+     work to a gRPC handler, and nothing called Sweeper again. SWEEPS KEPT
+     HAPPENING; the telemetry about them stopped. Moved to the RPC that does the
+     work now.
+
+     That is the THIRD orphaned instrumentation in this repo - traces, then logs,
+     now the sweep - and the shape is identical every time: the code still runs,
+     nothing fails, and only missing telemetry says anything is wrong. When a loop
+     or a handler MOVES, check what was measuring it moved too.
+
+  2. A LOST RACE WAS COUNTED AS AN OUTAGE. Every layer this project controls is
+     careful that losing a race is normal - logged at info, span not marked
+     failed. otelgrpc marked it an error anyway, because it treats every non-OK
+     gRPC code that way and offers no hook to change it. At 90% lost races during
+     an on-sale the Services tab would have shown a 90% error rate on a system
+     working perfectly, and an error rate that is always red is worthless on the
+     day something is actually broken.
+
+     The stats handler is wrapped on BOTH ENDS. Fixing only the server left half
+     of them red, because one call makes a client span and a server span with the
+     same name and each decides its own status.
+
+  WHAT THE AUDIT CONFIRMED IS FINE: every request log carries a trace id; 409, 404
+  and 400 all log at info; go runtime metrics on all nine services; pgxpool
+  metrics on exactly the four that own a database and none on the gateway, which
+  has no credentials for one.
+
+  MEASURE AFTER THE ROLLOUT SETTLES. A check run immediately after a deploy caught
+  the OLD pod still draining and reported the fix as not working.
+
   THE SAME TRAP AGAIN, ONE LAYER DOWN - LOGS. Fixed 2026-08-28. pkg/logger builds
   a careful correlation mechanism and the ONLY CALLER IN THE REPO WAS THE HELLO
   CANARY. The gateway served every request in the system and logged two lines,
