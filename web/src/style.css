@@ -241,6 +241,12 @@ button.ghost:hover { border-color: var(--muted); }
   min-width: 7rem;
 }
 .controls input[type="range"] { min-width: 11rem; padding: 0; border: none; background: none; }
+
+/* A SECOND ROW OF CONTROLS NEEDS AIR. The submit button lives in its own
+   .controls row under the fields it submits, and with no margin it sat flush
+   against them — reading as part of the last input rather than as the action. */
+.controls + .controls { margin-top: 0.9rem; }
+.controls + .hint { margin-top: 0.6rem; }
 .action.danger { background: #a3302a; color: #fff; }
 .action.danger:disabled { background: var(--line); color: var(--muted); }
 .msg.standalone { display: block; margin-top: 0.8rem; }

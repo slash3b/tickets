@@ -369,7 +369,7 @@ export default function Admin() {
                    onChange={(e) => setOver(e.target.value)} />
           </label>
           <button className="action danger" onClick={fire} disabled={firing || !eventID}>
-            {firing ? 'running…' : `Fire ${buyers} buyers`}
+            {firing ? 'running…' : 'Fire'}
           </button>
         </div>
         {ev && <p className="hint">target: {ev.title} at {ev.venue}</p>}
