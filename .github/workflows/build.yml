@@ -69,6 +69,21 @@ jobs:
             gofmt -d $unformatted
             exit 1
           fi
+      # THE GENERATED CODE IS COMMITTED, SO IT CAN GO STALE. Edit a .proto, forget
+      # to run buf generate, and everything still compiles against the old stubs
+      # while the contract file says something else. This regenerates and fails if
+      # the result differs from what was committed.
+      - name: proto is up to date
+        run: |
+          go install github.com/bufbuild/buf/cmd/buf@v1.72.0
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.2
+          buf lint
+          buf generate
+          if ! git diff --exit-code -- gen/; then
+            echo "gen/ is out of date — run 'buf generate' and commit the result" >&2
+            exit 1
+          fi
       - run: go vet ./...
       # -p 1 serialises packages: several share one database and truncate it on
       # setup, so running them concurrently makes one package delete another's

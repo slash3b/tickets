@@ -1,0 +1,55 @@
+# Topics as CRs, which is what the Strimzi entityOperator is for.
+#
+# ONE PARTITION EACH, AND THAT IS NOT LAZINESS. There is one broker, so a
+# partition count above one buys no parallelism and only spreads the same data
+# across more files. The interesting question — that inventory topics key by
+# event_id and therefore do NOT spread during an on-sale, while orders topics key
+# by order_id and spread perfectly — is a milestone 10 experiment and needs three
+# brokers to mean anything. Written here so the asymmetry is visible before it
+# is measurable.
+#
+# RETENTION IS SHORT. These carry seat state changes for events that happen
+# within days, and the compacted status topic below is the thing that is supposed
+# to survive. Long retention on a 15G disk is how this cluster ran out of room
+# before.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: inventory.seat.held
+  namespace: data
+  labels:
+    strimzi.io/cluster: tickets-kafka
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: "86400000"        # a day
+    segment.bytes: "67108864"       # 64Mi, so retention can actually delete
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: inventory.seat.released
+  namespace: data
+  labels:
+    strimzi.io/cluster: tickets-kafka
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: "86400000"
+    segment.bytes: "67108864"
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: inventory.seat.sold
+  namespace: data
+  labels:
+    strimzi.io/cluster: tickets-kafka
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: "86400000"
+    segment.bytes: "67108864"

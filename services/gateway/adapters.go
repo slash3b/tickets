@@ -78,7 +78,10 @@ func (a CatalogClient) Sections(ctx context.Context, eventID uuid.UUID) ([]Secti
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, Section{ID: id, Name: s.GetName(), Seats: int(s.GetSeats())})
+		out = append(out, Section{
+			ID: id, Name: s.GetName(),
+			Seats: int(s.GetSeats()), PriceMinor: s.GetPriceMinor(),
+		})
 	}
 	return out, nil
 }

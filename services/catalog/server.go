@@ -126,7 +126,10 @@ func (s *Server) ListSections(ctx context.Context, req *pb.ListSectionsRequest) 
 	}
 	out := make([]*pb.Section, len(rows))
 	for i, sec := range rows {
-		out[i] = &pb.Section{Id: sec.ID.String(), Name: sec.Name, Seats: int32(sec.Seats)}
+		out[i] = &pb.Section{
+			Id: sec.ID.String(), Name: sec.Name,
+			Seats: int32(sec.Seats), PriceMinor: sec.PriceMinor,
+		}
 	}
 	return &pb.ListSectionsResponse{Sections: out}, nil
 }

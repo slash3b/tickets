@@ -51,6 +51,9 @@ message Section {
   string id = 1;
   string name = 2;
   int32 seats = 3;
+  // What a seat in this section costs at this event. Zero means no price is set,
+  // which a caller must treat as unknown rather than free.
+  int64 price_minor = 4;
 }
 
 message Seat {

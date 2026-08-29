@@ -97,6 +97,21 @@ spec:
   hostnames:
     - app.tickets.lan
   rules:
+    # The seat-map stream is an SSE connection held open for as long as somebody
+    # has the page open. Envoy's default route timeout is 15 SECONDS, which would
+    # cut it every fifteen seconds forever — the same default that killed the
+    # first on-sale burst.
+    - matches:
+        - path: {type: PathPrefix, value: /api/events}
+      timeouts:
+        request: 3600s
+        backendRequest: 3600s
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: gateway
+          port: 80
+          weight: 1
     - matches:
         - path: {type: PathPrefix, value: /api}
       backendRefs:

@@ -217,6 +217,30 @@ func (s *Store) OpenEvent(ctx context.Context, eventID uuid.UUID, seatIDs []uuid
 	return int(tag.RowsAffected()), nil
 }
 
+// SeatIDsForHold returns which seats a hold covers.
+//
+// Needed because a seat change message names SEATS, while release and commit take
+// a HOLD. Read before committing: commit consumes the hold, and afterwards there
+// is no way back from a hold id to the seats it held.
+func (s *Store) SeatIDsForHold(ctx context.Context, holdID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := s.db.Query(ctx,
+		`SELECT seat_id FROM inventory.hold_seats WHERE hold_id = $1`, holdID)
+	if err != nil {
+		return nil, fmt.Errorf("seats for hold: %w", err)
+	}
+	defer rows.Close()
+
+	var out []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // SeatStatuses returns the current status of specific seats, for the read model.
 func (s *Store) SeatStatuses(ctx context.Context, eventID uuid.UUID, seatIDs []uuid.UUID) (map[uuid.UUID]string, error) {
 	rows, err := s.db.Query(ctx,

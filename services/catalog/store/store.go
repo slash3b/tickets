@@ -33,6 +33,9 @@ type Section struct {
 	ID    uuid.UUID
 	Name  string
 	Seats int
+	// PriceMinor for this section at a given event. Zero when no price is set,
+	// which callers must treat as "unknown" rather than "free".
+	PriceMinor int64
 }
 
 type Event struct {
@@ -269,10 +272,12 @@ func (s *Store) GetEvent(ctx context.Context, id uuid.UUID) (*Event, error) {
 // chooser without fetching a single seat.
 func (s *Store) Sections(ctx context.Context, eventID uuid.UUID) ([]*Section, error) {
 	rows, err := s.db.Query(ctx,
-		`SELECT sec.id, sec.name, count(st.id)
+		`SELECT sec.id, sec.name, count(st.id), coalesce(max(p.price_minor), 0)
 		   FROM catalog.events e
 		   JOIN catalog.sections sec ON sec.venue_id = e.venue_id
 		   LEFT JOIN catalog.seats st ON st.section_id = sec.id
+		   LEFT JOIN catalog.event_prices p
+		          ON p.event_id = e.id AND p.section_id = sec.id
 		  WHERE e.id = $1
 		  GROUP BY sec.id, sec.name, sec.display_order
 		  ORDER BY sec.display_order, sec.name`, eventID)
@@ -284,7 +289,7 @@ func (s *Store) Sections(ctx context.Context, eventID uuid.UUID) ([]*Section, er
 	var out []*Section
 	for rows.Next() {
 		var sec Section
-		if err := rows.Scan(&sec.ID, &sec.Name, &sec.Seats); err != nil {
+		if err := rows.Scan(&sec.ID, &sec.Name, &sec.Seats, &sec.PriceMinor); err != nil {
 			return nil, err
 		}
 		out = append(out, &sec)

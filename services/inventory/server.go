@@ -15,16 +15,22 @@ import (
 	"google.golang.org/grpc/status"
 
 	pb "github.com/slash3b/tickets/gen/tickets/v1"
+	"github.com/slash3b/tickets/pkg/events"
 	"github.com/slash3b/tickets/services/inventory/store"
 )
 
 type Server struct {
 	pb.UnimplementedInventoryServiceServer
 	store *store.Store
+	pub   *events.Publisher
 	lg    *zap.Logger
 }
 
-func NewServer(s *store.Store, lg *zap.Logger) *Server { return &Server{store: s, lg: lg} }
+// NewServer takes a nil publisher happily: without a broker the system still
+// works, it just goes back to browsers polling for changes.
+func NewServer(s *store.Store, pub *events.Publisher, lg *zap.Logger) *Server {
+	return &Server{store: s, pub: pub, lg: lg}
+}
 
 func (s *Server) Hold(ctx context.Context, req *pb.HoldRequest) (*pb.HoldResponse, error) {
 	eventID, err := parseUUID(req.GetEventId())
@@ -51,7 +57,23 @@ func (s *Server) Hold(ctx context.Context, req *pb.HoldRequest) (*pb.HoldRespons
 	case err != nil:
 		return nil, status.Error(codes.Internal, "could not hold seats")
 	}
+	// PUBLISHED AFTER THE COMMIT, NEVER BEFORE. The database is the truth; Kafka
+	// carries news of it. Publishing first would announce a hold that might not
+	// exist, and no consumer could tell the difference.
+	s.publish(ctx, events.TopicSeatHeld, events.SeatChange{
+		EventID: req.GetEventId(), SeatIDs: req.GetSeatIds(),
+		HoldID: id.String(), Status: "held",
+	})
 	return &pb.HoldResponse{HoldId: id.String()}, nil
+}
+
+// publish is fire-and-forget. A seat claim must never wait on a broker: the
+// transaction has committed and the customer is owed an answer.
+func (s *Server) publish(ctx context.Context, topic string, c events.SeatChange) {
+	if s.pub == nil {
+		return
+	}
+	s.pub.Publish(ctx, topic, c)
 }
 
 func (s *Server) Release(ctx context.Context, req *pb.ReleaseRequest) (*pb.ReleaseResponse, error) {
@@ -63,9 +85,18 @@ func (s *Server) Release(ctx context.Context, req *pb.ReleaseRequest) (*pb.Relea
 	if reason == "" {
 		reason = "released"
 	}
+	seatIDs, err := s.store.SeatIDsForHold(ctx, id)
+	if err != nil {
+		// Not fatal: the release itself matters more than announcing it.
+		s.lg.Warn("could not read seats for hold before release", zap.Error(err))
+	}
 	if err := s.store.Release(ctx, id, reason); err != nil {
 		return nil, status.Error(codes.Internal, "could not release hold")
 	}
+	s.publish(ctx, events.TopicSeatReleased, events.SeatChange{
+		SeatIDs: uuidsToStrings(seatIDs), HoldID: id.String(),
+		Status: "available", Reason: reason,
+	})
 	return &pb.ReleaseResponse{}, nil
 }
 
@@ -85,6 +116,13 @@ func (s *Server) Commit(ctx context.Context, req *pb.CommitRequest) (*pb.CommitR
 	if err != nil {
 		return nil, err
 	}
+	// Read the seats BEFORE committing: commit consumes the hold, and afterwards
+	// there is no way back from a hold id to the seats it held.
+	seatIDs, sErr := s.store.SeatIDsForHold(ctx, id)
+	if sErr != nil {
+		s.lg.Warn("could not read seats for hold before commit", zap.Error(sErr))
+	}
+
 	err = s.store.Commit(ctx, id)
 	switch {
 	case errors.Is(err, store.ErrHoldReleased):
@@ -95,6 +133,9 @@ func (s *Server) Commit(ctx context.Context, req *pb.CommitRequest) (*pb.CommitR
 	case err != nil:
 		return nil, status.Error(codes.Internal, "could not commit hold")
 	}
+	s.publish(ctx, events.TopicSeatSold, events.SeatChange{
+		SeatIDs: uuidsToStrings(seatIDs), HoldID: id.String(), Status: "sold",
+	})
 	return &pb.CommitResponse{}, nil
 }
 
@@ -144,6 +185,14 @@ func (s *Server) Sweep(ctx context.Context, _ *pb.SweepRequest) (*pb.SweepRespon
 		return nil, status.Error(codes.Internal, "sweep hard deadline failed")
 	}
 	return &pb.SweepResponse{Expired: int32(expired), HardDeadline: int32(len(hard))}, nil
+}
+
+func uuidsToStrings(ids []uuid.UUID) []string {
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = id.String()
+	}
+	return out
 }
 
 func parseUUID(s string) (uuid.UUID, error) {

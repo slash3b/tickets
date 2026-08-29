@@ -53,6 +53,10 @@ type Section struct {
 	ID    uuid.UUID `json:"id"`
 	Name  string    `json:"name"`
 	Seats int       `json:"seats"`
+	// The frontend needs this to show a total before someone commits to buying.
+	// It used to hardcode a number that mirrored the seeder, which would have
+	// charged a real amount for a guessed one.
+	PriceMinor int64 `json:"price_minor"`
 }
 
 type Seat struct {
@@ -76,10 +80,19 @@ type API struct {
 	orders    Orders
 	holdTTL   time.Duration
 	lg        *zap.Logger
+	hub       *hub
 }
 
 func New(c Catalog, i Inventory, o Orders, holdTTL time.Duration, lg *zap.Logger) *API {
 	return &API{catalog: c, inventory: i, orders: o, holdTTL: holdTTL, lg: lg}
+}
+
+// WithStreaming turns on the live seat map. Without it the API is exactly what it
+// was and browsers keep polling, which is the correct behaviour when there is no
+// broker to listen to.
+func (a *API) WithStreaming(lg *zap.Logger) *API {
+	a.hub = newHub(lg)
+	return a
 }
 
 func (a *API) Handler() http.Handler {
@@ -94,6 +107,11 @@ func (a *API) Handler() http.Handler {
 	obs.Route(mux, a.lg, "GET /api/events/upcoming", a.listUpcoming)
 	obs.Route(mux, a.lg, "GET /api/events/{id}", a.getEvent)
 	obs.Route(mux, a.lg, "GET /api/events/{id}/sections", a.listSections)
+	// NOT wrapped in obs.Route: a stream is open for minutes, and a span that
+	// lives as long as the connection tells you nothing except that somebody has
+	// a browser tab open. The interesting spans are the changes flowing through
+	// it, and those belong to inventory.
+	mux.HandleFunc("GET /api/events/{id}/stream", a.stream)
 	obs.Route(mux, a.lg, "GET /api/events/{id}/sections/{sid}", a.sectionSeats)
 	obs.Route(mux, a.lg, "POST /api/holds", a.createHold)
 	obs.Route(mux, a.lg, "DELETE /api/holds/{id}", a.releaseHold)

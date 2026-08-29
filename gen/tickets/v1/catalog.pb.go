@@ -110,10 +110,13 @@ func (x *Event) GetOnSaleAt() *timestamppb.Timestamp {
 }
 
 type Section struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Seats         int32                  `protobuf:"varint,3,opt,name=seats,proto3" json:"seats,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name  string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Seats int32                  `protobuf:"varint,3,opt,name=seats,proto3" json:"seats,omitempty"`
+	// What a seat in this section costs at this event. Zero means no price is set,
+	// which a caller must treat as unknown rather than free.
+	PriceMinor    int64 `protobuf:"varint,4,opt,name=price_minor,json=priceMinor,proto3" json:"price_minor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -165,6 +168,13 @@ func (x *Section) GetName() string {
 func (x *Section) GetSeats() int32 {
 	if x != nil {
 		return x.Seats
+	}
+	return 0
+}
+
+func (x *Section) GetPriceMinor() int64 {
+	if x != nil {
+		return x.PriceMinor
 	}
 	return 0
 }
@@ -1634,11 +1644,13 @@ const file_tickets_v1_catalog_proto_rawDesc = "" +
 	"\x05venue\x18\x04 \x01(\tR\x05venue\x127\n" +
 	"\tstarts_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\bstartsAt\x128\n" +
 	"\n" +
-	"on_sale_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\bonSaleAt\"C\n" +
+	"on_sale_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\bonSaleAt\"d\n" +
 	"\aSection\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
-	"\x05seats\x18\x03 \x01(\x05R\x05seats\"\\\n" +
+	"\x05seats\x18\x03 \x01(\x05R\x05seats\x12\x1f\n" +
+	"\vprice_minor\x18\x04 \x01(\x03R\n" +
+	"priceMinor\"\\\n" +
 	"\x04Seat\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x10\n" +
 	"\x03row\x18\x02 \x01(\tR\x03row\x12\x16\n" +

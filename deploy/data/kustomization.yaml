@@ -5,3 +5,4 @@ resources:
   - postgres.yaml
   - redis.yaml
   - kafka.yaml
+  - topics.yaml
