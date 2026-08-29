@@ -59,6 +59,16 @@ type Config struct {
 	// TargetEventID pins every session to one event. Empty means wander, which is
 	// what steady traffic should do.
 	TargetEventID string `json:"target_event_id,omitempty"`
+
+	// Rush makes every buyer go for the BEST seats instead of a random block.
+	//
+	// WITHOUT THIS A BURST IS NOT AN ON-SALE. The first run of 500 buyers at a
+	// 20,000-seat arena produced zero lost races, because each one picked a random
+	// section and a random block inside it — 500 darts at a very large board.
+	// Real buyers all want the front of Block 1, which is what turns an on-sale
+	// into a fight over a few hundred seats and is the only thing that exercises
+	// the seat-claim primitive under pressure.
+	Rush bool `json:"rush,omitempty"`
 }
 
 // DefaultConfig paces one showing's 96 seats across a whole DAY, while keeping
@@ -283,6 +293,10 @@ func (s *Simulator) RunOne(ctx context.Context, profile Profile) {
 		return
 	}
 	section := sections[s.intn(len(sections))]
+	if s.config().Rush {
+		// Everybody piles into the same block, the way everybody wants the floor.
+		section = sections[0]
+	}
 
 	seats, err := s.seats(ctx, event.ID, section.ID)
 	if err != nil {
@@ -357,5 +371,11 @@ func (s *Simulator) pickAvailable(seats []seat, want int) []string {
 	// Adjacent, because "three seats together" is what people actually ask for
 	// and it is what makes seat sets overlap.
 	start := s.intn(len(free) - want + 1)
+	if s.config().Rush {
+		// THE BEST SEATS, not a random block. Every buyer converges on the same
+		// front rows, so the seat sets in flight overlap heavily — which is the
+		// whole point of an on-sale and the only way lock ordering gets tested.
+		start = 0
+	}
 	return free[start : start+want]
 }

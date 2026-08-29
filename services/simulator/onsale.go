@@ -51,6 +51,7 @@ func (s *Simulator) Burst(ctx context.Context, eventID string, buyers int, over 
 	prev := s.config()
 	cfg := prev
 	cfg.TargetEventID = eventID
+	cfg.Rush = true
 	s.SetConfig(cfg)
 	defer s.SetConfig(prev)
 
