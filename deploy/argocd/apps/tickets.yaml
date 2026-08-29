@@ -17,6 +17,47 @@ spec:
     path: deploy/apps/tickets
   destination:
     server: https://kubernetes.default.svc
+  # HPA OWNS THE REPLICA COUNT FOR THESE, ARGO MUST NOT FIGHT IT.
+  #
+  # The Deployments say `replicas: 1`, HPA changes it under load, and selfHeal
+  # would put it straight back — scaling up and being scaled down again every
+  # few seconds, during exactly the burst that needed the capacity.
+  #
+  # LISTED BY NAME RATHER THAN FOR ALL DEPLOYMENTS, deliberately. workers and
+  # simulator are NOT here: workers must stay at one replica because it runs the
+  # singletons, and Argo enforcing that is a real safety net rather than an
+  # inconvenience.
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      name: gateway
+      jsonPointers:
+        - /spec/replicas
+    - group: apps
+      kind: Deployment
+      name: catalog
+      jsonPointers:
+        - /spec/replicas
+    - group: apps
+      kind: Deployment
+      name: inventory
+      jsonPointers:
+        - /spec/replicas
+    - group: apps
+      kind: Deployment
+      name: orders
+      jsonPointers:
+        - /spec/replicas
+    - group: apps
+      kind: Deployment
+      name: payments
+      jsonPointers:
+        - /spec/replicas
+    - group: apps
+      kind: Deployment
+      name: web
+      jsonPointers:
+        - /spec/replicas
   syncPolicy:
     automated: {prune: true, selfHeal: true}
     syncOptions:

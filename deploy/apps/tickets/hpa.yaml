@@ -1,0 +1,152 @@
+# Horizontal autoscaling.
+#
+# HPA AND VPA ON THE SAME RESOURCE FIGHT EACH OTHER. VPA changes a pod's request;
+# HPA scales on utilisation as a PERCENTAGE OF that request. Point both at memory
+# and each one's action changes the other's input, which oscillates. The split
+# here is the documented safe one and it is why the VPA policies are memory-only:
+#
+#   VPA  owns memory  — how big each pod is
+#   HPA  owns CPU     — how many of them there are
+#
+# CPU is also the right signal for this system. Memory here is driven by the size
+# of a seat map, which is a property of the venue and not of load; CPU is driven
+# by how many people are asking, which is exactly what more replicas help with.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: gateway
+  namespace: tickets
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: gateway}
+  minReplicas: 1
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: 70}}
+  behavior:
+    scaleUp:
+      # An on-sale arrives in seconds, not minutes. The default 5-minute
+      # stabilisation window would finish scaling up after the sale was over.
+      stabilizationWindowSeconds: 0
+      policies:
+        - {type: Percent, value: 100, periodSeconds: 15}
+    scaleDown:
+      # Slow to shrink, deliberately: a lull between bursts is not the end of the
+      # on-sale, and paying for a few idle pods beats cold-starting into a spike.
+      stabilizationWindowSeconds: 300
+      policies:
+        - {type: Percent, value: 50, periodSeconds: 60}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: catalog
+  namespace: tickets
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: catalog}
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: 70}}
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies: [{type: Percent, value: 100, periodSeconds: 15}]
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies: [{type: Percent, value: 50, periodSeconds: 60}]
+---
+# INVENTORY CAN SCALE, AND THAT WAS A DESIGN DECISION MADE EARLIER.
+#
+# The expiry sweeper is not a loop inside this service — workers drives it over
+# gRPC — precisely so that the contended core is not pinned to one replica by a
+# singleton it happens to contain. This is that decision paying off.
+#
+# Correctness does not depend on the replica count: the seat claim is one
+# conditional UPDATE, so N inventory pods contend in Postgres exactly as N
+# goroutines in one pod did, and the oversell test has always been about that
+# statement rather than about process count.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: inventory
+  namespace: tickets
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: inventory}
+  minReplicas: 1
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: 70}}
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies: [{type: Percent, value: 100, periodSeconds: 15}]
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies: [{type: Percent, value: 50, periodSeconds: 60}]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: orders
+  namespace: tickets
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: orders}
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: 70}}
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies: [{type: Percent, value: 100, periodSeconds: 15}]
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies: [{type: Percent, value: 50, periodSeconds: 60}]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: payments
+  namespace: tickets
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: payments}
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: 70}}
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies: [{type: Percent, value: 100, periodSeconds: 15}]
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies: [{type: Percent, value: 50, periodSeconds: 60}]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: web
+  namespace: tickets
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: web}
+  minReplicas: 1
+  maxReplicas: 3
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: 80}}
+---
+# THERE IS DELIBERATELY NO HPA FOR workers, AND ADDING ONE WOULD BE A BUG.
+#
+# It runs the singletons: both inventory sweepers, the payment reconciler and the
+# order resumer. Nothing there is unsafe concurrently, but N replicas do N times
+# the work on the same rows and multiply traffic to the bank by N. It is pinned
+# at one replica with strategy Recreate for the same reason — a rolling update
+# would briefly run two.
+#
+# Nor for simulator: scaling the load generator multiplies the load, which is a
+# thing to decide, not a thing to let a controller decide.
