@@ -878,6 +878,34 @@ THE APPLICATION - DEPLOYED 2026-08-27
   replicas do N times the work on the same rows and multiply traffic to the bank.
   strategy: Recreate is deliberate - a rolling update would briefly run two.
 
+  REDIS IS NO LONGER INERT EITHER, as of 2026-08-29. It holds the seat-map
+  projection, which is exactly the job DESIGN.md gave it and nothing more.
+
+    key      seatstatus:<event_id>, a hash of seat_id -> available|held|sold
+    writer   gateway, from the same inventory.seat.* stream that feeds browsers
+    reader   gateway, on GET /api/events/{id}/sections/{sid}
+
+  MEASURED, WHICH IS WHY IT WAS WORTH DOING. Before: a seat-map read averaged
+  586ms and hit 2918ms at p95, because it read 2,000 rows from
+  inventory.event_seats - THE SAME TABLE EVERY SEAT CLAIM CONTENDS ON. Under a
+  2,000-buyer on-sale afterwards: median 24ms, p95 44ms, max 59ms. Roughly 25x at
+  the median and 66x at p95, and browse traffic no longer touches the contended
+  writer's rows at all.
+
+  THE DESIGN'S OWN TEST, RUN FOR REAL: redis-cli FLUSHALL during traffic. The next
+  read went from 16ms to 31ms and returned the correct 2,000 seats; the one after
+  was warm again. Flushing costs latency and nothing else, which is the property
+  the whole arrangement depends on.
+
+  IT IS A CACHE AND NEVER THE TRUTH. A partial hit counts as a miss, every miss
+  falls through to inventory, client timeouts are short so a slow Redis degrades
+  into a miss rather than a slow request, and an unreachable Redis is a start-up
+  warning rather than a refusal to boot. It is deliberately NOT in readiness.
+
+  NEVER PUT HOLD TTLs HERE. Redis key expiry is not a reliable event source, and a
+  hold that exists in Redis but not Postgres is a seat sold twice. The sweeper in
+  Postgres owns expiry and always will.
+
   KAFKA IS NO LONGER INERT, as of 2026-08-29. From phase 0.7 until then a broker
   ran doing nothing while DESIGN.md described an event-driven system that was
   entirely synchronous - which is exactly the "installed but unused" state this

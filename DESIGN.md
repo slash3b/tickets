@@ -419,7 +419,13 @@ DATA STORES
                 separate databases later a config change instead of a rewrite. Source of
                 truth for absolutely everything that matters.
 
-  Redis         Catalog reads and seat-map projections only. NEVER the truth for
+  Redis         LIVE since 2026-08-29, doing exactly this and nothing else.
+                Measured: seat-map reads went from 586ms average / 2918ms p95 to
+                24ms median / 44ms p95 under a 2,000-buyer on-sale, and browse
+                traffic stopped touching the rows the seat claims contend on.
+                The flush test was run for real and passed.
+
+                Catalog reads and seat-map projections only. NEVER the truth for
                 inventory, and specifically NOT the holder of hold TTLs - Redis key
                 expiry is not a reliable event source, and a hold that exists in Redis
                 but not Postgres is an oversell waiting to happen.
