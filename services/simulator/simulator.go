@@ -172,6 +172,10 @@ func (s *Simulator) SetConfig(cfg Config) {
 	s.cfg = cfg
 }
 
+// burstKey carries the rehearsal's span context so a session can LINK to it
+// without becoming part of its trace.
+type burstKey struct{}
+
 func (s *Simulator) target() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -253,8 +257,24 @@ func (s *Simulator) RunOne(ctx context.Context, profile Profile) {
 	// journey - browse, hold, pay - rather than eight disconnected HTTP calls. The
 	// profile is an attribute, so "show me the group buyers who lost a race" is a
 	// filter rather than an archaeology exercise.
-	ctx, span := tracer.Start(ctx, "session "+string(profile),
-		trace.WithAttributes(attribute.String("buyer.profile", string(profile))))
+	// A BURST MUST NOT PUT EVERY BUYER IN ONE TRACE. Passing the burst's context
+	// straight down made each session a child of it: 12 buyers came out as a
+	// single trace of 1,177 spans, and at 3,000 buyers that is a third of a
+	// million spans in one trace — unopenable in any UI, and with no way to look
+	// at what happened to ONE customer, which is the entire reason these spans
+	// exist.
+	//
+	// Each session is its own trace, LINKED to the burst instead of parented by
+	// it. A link says "these are related" without making them one tree, which is
+	// exactly the relationship: the rehearsal caused the sessions, it does not
+	// contain them.
+	opts := []trace.SpanStartOption{
+		trace.WithAttributes(attribute.String("buyer.profile", string(profile))),
+	}
+	if bs, ok := ctx.Value(burstKey{}).(trace.SpanContext); ok && bs.IsValid() {
+		opts = append(opts, trace.WithNewRoot(), trace.WithLinks(trace.Link{SpanContext: bs}))
+	}
+	ctx, span := tracer.Start(ctx, "session "+string(profile), opts...)
 	defer span.End()
 
 	events, err := s.listEvents(ctx)

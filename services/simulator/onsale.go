@@ -40,12 +40,18 @@ type BurstResult struct {
 func (s *Simulator) Burst(ctx context.Context, eventID string, buyers int, over time.Duration, groupShare float64) BurstResult {
 	// One span for the whole rehearsal, so the entire event is a single thing to
 	// look at afterwards rather than N unrelated traces.
+	parent := ctx
 	ctx, span := tracer.Start(ctx, "on-sale burst", trace.WithAttributes(
 		attribute.String("event_id", eventID),
 		attribute.Int("buyers", buyers),
 		attribute.String("over", over.String()),
 	))
 	defer span.End()
+
+	// Sessions run on a context that does NOT carry the burst span, so each buyer
+	// gets its own trace, plus the burst's span context so each can link back.
+	// See the note in RunOne for why this is not parent-child.
+	sessionCtx := context.WithValue(parent, burstKey{}, span.SpanContext())
 
 	before := snapshot(&s.Stats)
 	start := time.Now()
@@ -97,7 +103,7 @@ func (s *Simulator) Burst(ctx context.Context, eventID string, buyers int, over 
 			}
 			defer func() { <-sem }()
 
-			s.RunOne(ctx, profile)
+			s.RunOne(sessionCtx, profile)
 		}(delay, profile)
 	}
 	wg.Wait()
