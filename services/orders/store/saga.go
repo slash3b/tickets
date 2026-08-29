@@ -104,7 +104,14 @@ func (sg *Saga) Run(ctx context.Context, orderID uuid.UUID) error {
 
 	for {
 		before := o.State
-		lastState = o.State
+
+		// The last state in which WORK HAPPENED. `failed` is a resting place, not a
+		// step, and recording it would make every failure report failed_at=failed —
+		// which is what the first version of this metric did, and it answered
+		// nothing.
+		if !isTerminal(before) {
+			lastState = before
+		}
 
 		// One span per STEP, named after the state being left. This is where the
 		// forward-recovery gap becomes visible: a trace that stops at "paid" with
@@ -124,16 +131,11 @@ func (sg *Saga) Run(ctx context.Context, orderID uuid.UUID) error {
 			return nil // terminal, or waiting on something outside the saga
 		}
 
-		outcome := "ok"
 		if err != nil {
-			outcome = "error"
-		}
-		stepDuration.Record(ctx, time.Since(startedAt).Seconds(), metric.WithAttributes(
-			attribute.String("step", before2step(before)),
-			attribute.String("outcome", outcome),
-		))
-
-		if err != nil {
+			stepDuration.Record(ctx, time.Since(startedAt).Seconds(), metric.WithAttributes(
+				attribute.String("step", before2step(before)),
+				attribute.String("outcome", "error"),
+			))
 			step.RecordError(err)
 			step.SetStatus(codes.Error, "saga step failed")
 			step.End()
@@ -144,6 +146,23 @@ func (sg *Saga) Run(ctx context.Context, orderID uuid.UUID) error {
 		if o, err = sg.store.Get(ctx, orderID); err != nil {
 			return err
 		}
+
+		// OUTCOME IS READ FROM WHERE THE STEP LANDED, NOT FROM err.
+		//
+		// A declined card is not an error: charge did its job and the answer was
+		// no, so err is nil and the order is now `failed`. Deciding the outcome
+		// from err alone labelled every decline "ok" and made the one distribution
+		// worth comparing — how long a rejected purchase takes against an accepted
+		// one — impossible to ask for.
+		outcome := "ok"
+		if o.State == StateFailed {
+			outcome = "failed"
+		}
+		stepDuration.Record(ctx, time.Since(startedAt).Seconds(), metric.WithAttributes(
+			attribute.String("step", before2step(before)),
+			attribute.String("outcome", outcome),
+		))
+
 		if o.State == before {
 			// No progress possible right now — an unknown payment, say. Leave it
 			// for the resumer rather than spinning.
