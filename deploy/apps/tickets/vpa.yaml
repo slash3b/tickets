@@ -1,0 +1,133 @@
+# Right-sizing for the application services.
+#
+# WHY THIS EXISTS: every memory limit in this repo was a guess made when the
+# biggest object in the system was a 96-seat cinema. The arena made all of them
+# wrong simultaneously and the first on-sale OOMKilled the gateway and the
+# simulator. Guessing again by hand would leave exactly the same trap for
+# whatever comes after the arena.
+#
+# MODE IS InPlaceOrRecreate. Kubernetes 1.36 can change a running pod's resources
+# without restarting it, so the usual reason to keep VPA in recommendation-only
+# mode — that acting on a recommendation costs a restart — is gone. It falls back
+# to recreate only where in-place is impossible.
+#
+# EVERY POLICY BOUNDS BOTH ENDS. An unbounded VPA will happily recommend
+# something that cannot be scheduled on a 12G node, and will also shrink an idle
+# service until its first burst OOMs it. minAllowed is set from what these
+# actually use at rest; maxAllowed from what the node can spare.
+#
+# CPU IS DELIBERATELY LEFT ALONE (controlledResources: memory). These services
+# are idle almost all the time and spike hard during an on-sale; a CPU
+# recommendation built from that average would throttle exactly when it matters.
+# Memory is the resource that actually killed things, so memory is what this
+# manages.
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: gateway
+  namespace: tickets
+spec:
+  targetRef: {apiVersion: apps/v1, kind: Deployment, name: gateway}
+  updatePolicy:
+    updateMode: InPlaceOrRecreate
+  resourcePolicy:
+    containerPolicies:
+      - containerName: gateway
+        controlledResources: [memory]
+        controlledValues: RequestsAndLimits
+        minAllowed: {memory: 96Mi}
+        maxAllowed: {memory: 768Mi}
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: catalog
+  namespace: tickets
+spec:
+  targetRef: {apiVersion: apps/v1, kind: Deployment, name: catalog}
+  updatePolicy:
+    updateMode: InPlaceOrRecreate
+  resourcePolicy:
+    containerPolicies:
+      - containerName: catalog
+        controlledResources: [memory]
+        controlledValues: RequestsAndLimits
+        minAllowed: {memory: 96Mi}
+        maxAllowed: {memory: 768Mi}
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: inventory
+  namespace: tickets
+spec:
+  targetRef: {apiVersion: apps/v1, kind: Deployment, name: inventory}
+  updatePolicy:
+    updateMode: InPlaceOrRecreate
+  resourcePolicy:
+    containerPolicies:
+      - containerName: inventory
+        controlledResources: [memory]
+        controlledValues: RequestsAndLimits
+        minAllowed: {memory: 96Mi}
+        maxAllowed: {memory: 768Mi}
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: orders
+  namespace: tickets
+spec:
+  targetRef: {apiVersion: apps/v1, kind: Deployment, name: orders}
+  updatePolicy:
+    updateMode: InPlaceOrRecreate
+  resourcePolicy:
+    containerPolicies:
+      - containerName: orders
+        controlledResources: [memory]
+        controlledValues: RequestsAndLimits
+        minAllowed: {memory: 64Mi}
+        maxAllowed: {memory: 512Mi}
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: payments
+  namespace: tickets
+spec:
+  targetRef: {apiVersion: apps/v1, kind: Deployment, name: payments}
+  updatePolicy:
+    updateMode: InPlaceOrRecreate
+  resourcePolicy:
+    containerPolicies:
+      - containerName: payments
+        controlledResources: [memory]
+        controlledValues: RequestsAndLimits
+        minAllowed: {memory: 64Mi}
+        maxAllowed: {memory: 512Mi}
+---
+# workers is a SINGLETON and must never be evicted to be resized — two of it
+# would run both sweepers and double the traffic to the bank. In-place handles
+# that, and the updater's min-replicas backstop covers the case where it cannot.
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: workers
+  namespace: tickets
+spec:
+  targetRef: {apiVersion: apps/v1, kind: Deployment, name: workers}
+  updatePolicy:
+    updateMode: InPlaceOrRecreate
+  resourcePolicy:
+    containerPolicies:
+      - containerName: workers
+        controlledResources: [memory]
+        controlledValues: RequestsAndLimits
+        minAllowed: {memory: 64Mi}
+        maxAllowed: {memory: 384Mi}
+---
+# The simulator is deliberately NOT managed. Its memory is a function of how big
+# a burst somebody decided to fire, not of steady behaviour — a recommender that
+# averaged its idle weeks would shrink it straight back into the OOM that started
+# all this, and then grow it again after the damage. BURST_CONCURRENCY is the
+# right dial for that, and it is a human decision.

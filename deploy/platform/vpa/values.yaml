@@ -1,0 +1,44 @@
+# VPA 1.7.1 via the fairwinds chart.
+#
+# THREE COMPONENTS AND THEY DO DIFFERENT JOBS:
+#   recommender  watches usage and writes a recommendation onto each VPA object.
+#                Harmless on its own — this is the part you can run for weeks
+#                before trusting anything to act on it.
+#   updater      applies the recommendation to running pods. With in-place resize
+#                available it patches them; without it, it evicts them.
+#   admission    sets resources on pods as they are created.
+#
+# The recommender needs the most memory because it holds a history of every pod
+# it watches. It is still small at this cluster's size.
+
+recommender:
+  enabled: true
+  extraArgs:
+    # In-place resize is the whole reason this is installed rather than avoided.
+    v: "2"
+  resources:
+    requests: {cpu: 25m, memory: 128Mi}
+    limits:   {memory: 512Mi}
+
+updater:
+  enabled: true
+  extraArgs:
+    v: "2"
+    # Do not touch anything running fewer than this many replicas by EVICTION.
+    # With in-place resize the updater patches instead, but this stays as the
+    # backstop for any resource it cannot resize in place — a singleton like
+    # workers must not be evicted to save a few megabytes.
+    min-replicas: "1"
+  resources:
+    requests: {cpu: 25m, memory: 64Mi}
+    limits:   {memory: 256Mi}
+
+admissionController:
+  enabled: true
+  resources:
+    requests: {cpu: 10m, memory: 64Mi}
+    limits:   {memory: 256Mi}
+
+# The CRDs come from the chart; Argo owns them like everything else here.
+rbac:
+  create: true

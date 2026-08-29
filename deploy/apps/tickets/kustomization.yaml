@@ -12,6 +12,7 @@ resources:
 - simulator.yaml
 - seeder.yaml
 - web.yaml
+- vpa.yaml
 images:
 - name: ghcr.io/slash3b/tickets-catalog
   newTag: f8e8054ddbcbb7d0b145d3d331381c34ff1f5966

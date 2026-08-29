@@ -1,0 +1,41 @@
+# Vertical Pod Autoscaler.
+#
+# Installed 2026-08-29 after the first on-sale OOMKilled the gateway and the
+# simulator. Every memory limit in this repo was set by hand when the biggest
+# thing in the system was a 96-seat cinema; the arena made all of them wrong at
+# once, and nothing noticed until pods started dying under load.
+#
+# WHY THIS IS SAFE HERE AND OFTEN IS NOT: Kubernetes 1.36 exposes the
+# pods/resize subresource, so VPA 1.7 can change a running pod's resources IN
+# PLACE. The historical objection to VPA — that it evicts pods to resize them,
+# so the autoscaler becomes a source of restarts — does not apply. Verified
+# before installing: `kubectl get --raw /api/v1` lists pods/resize.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: vpa
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - repoURL: https://charts.fairwinds.com/stable
+      chart: vpa
+      targetRevision: 5.0.0
+      helm:
+        valueFiles:
+          - $values/deploy/platform/vpa/values.yaml
+    - repoURL: https://github.com/slash3b/tickets.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: vpa
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
