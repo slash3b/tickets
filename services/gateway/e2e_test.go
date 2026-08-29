@@ -99,7 +99,7 @@ func buildSystem(t *testing.T, bankCfg bank.Config) (*httptest.Server, *catalogs
 	})
 	payConn := serveGRPC(t, nop, func(s *grpc.Server) {
 		pb.RegisterPaymentsServiceServer(s, payments.NewServer(
-			pay, bankCli, paystore.NewReconciler(pay, bankCli, time.Minute), nop))
+			pay, bankCli, paystore.NewReconciler(pay, bankCli, time.Minute), nil, nop))
 	})
 
 	// Orders talks to inventory and payments as clients, exactly as in the cluster.
@@ -108,7 +108,7 @@ func buildSystem(t *testing.T, bankCfg bank.Config) (*httptest.Server, *catalogs
 		orders.PaymentsAdapter{C: payments.NewClient(payConn)})
 	ordConn := serveGRPC(t, nop, func(s *grpc.Server) {
 		pb.RegisterOrdersServiceServer(s, orders.NewServer(
-			ord, saga, ordersstore.NewResumer(saga, ord, time.Minute), nop))
+			ord, saga, ordersstore.NewResumer(saga, ord, time.Minute), nil, nop))
 	})
 
 	api := New(

@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	pb "github.com/slash3b/tickets/gen/tickets/v1"
+	"github.com/slash3b/tickets/pkg/events"
 	"github.com/slash3b/tickets/services/payments/bankclient"
 	"github.com/slash3b/tickets/services/payments/store"
 )
@@ -25,11 +26,19 @@ type Server struct {
 	store      *store.Store
 	bank       *bankclient.Client
 	reconciler *store.Reconciler
+	pub        *events.Publisher
 	lg         *zap.Logger
 }
 
-func NewServer(s *store.Store, bank *bankclient.Client, rec *store.Reconciler, lg *zap.Logger) *Server {
-	return &Server{store: s, bank: bank, reconciler: rec, lg: lg}
+func NewServer(s *store.Store, bank *bankclient.Client, rec *store.Reconciler, pub *events.Publisher, lg *zap.Logger) *Server {
+	return &Server{store: s, bank: bank, reconciler: rec, pub: pub, lg: lg}
+}
+
+func (s *Server) publish(ctx context.Context, topic string, c events.OrderChange) {
+	if s.pub == nil {
+		return
+	}
+	s.pub.PublishOrder(ctx, topic, c)
 }
 
 func (s *Server) Charge(ctx context.Context, req *pb.ChargeRequest) (*pb.ChargeResponse, error) {
@@ -52,6 +61,9 @@ func (s *Server) Charge(ctx context.Context, req *pb.ChargeRequest) (*pb.ChargeR
 		if err := s.store.Resolve(ctx, orderID, store.StateSucceeded, charge.ID, ""); err != nil {
 			return nil, status.Error(codes.Internal, "could not record success")
 		}
+		s.publish(ctx, events.TopicPaymentSucceeded, events.OrderChange{
+			OrderID: orderID.String(), AmountMinor: req.GetAmountMinor(), State: "succeeded",
+		})
 		return &pb.ChargeResponse{Outcome: pb.Outcome_OUTCOME_SUCCEEDED}, nil
 
 	case charge != nil && charge.Status == "declined":
@@ -61,6 +73,10 @@ func (s *Server) Charge(ctx context.Context, req *pb.ChargeRequest) (*pb.ChargeR
 		// OK with OUTCOME_FAILED, not an error status. The call worked; the answer
 		// was no. Encoding a business outcome as a transport failure is how retry
 		// logic ends up retrying decisions made correctly the first time.
+		s.publish(ctx, events.TopicPaymentFailed, events.OrderChange{
+			OrderID: orderID.String(), AmountMinor: req.GetAmountMinor(),
+			State: "failed", Reason: charge.DeclineCode,
+		})
 		return &pb.ChargeResponse{
 			Outcome: pb.Outcome_OUTCOME_FAILED, DeclineCode: charge.DeclineCode,
 		}, nil

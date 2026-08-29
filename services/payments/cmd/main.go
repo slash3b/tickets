@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/slash3b/tickets/pkg/env"
+	"github.com/slash3b/tickets/pkg/events"
 	"github.com/slash3b/tickets/pkg/grpcx"
 	"github.com/slash3b/tickets/pkg/health"
 	"github.com/slash3b/tickets/pkg/logger"
@@ -45,12 +46,13 @@ func main() {
 
 func run() error {
 	var (
-		httpPort = env.Get("PORT", "8080")
-		grpcPort = env.Get("GRPC_PORT", "9090")
-		debug    = env.Get("DEBUG", "false") == "true"
-		otlp     = env.Get("OTEL_EXPORTER_OTLP_ENDPOINT", "")
-		dsn      = env.Get("DATABASE_URL", "")
-		bankURL  = env.Get("BANK_URL", "http://bank.bank.svc.cluster.local")
+		httpPort  = env.Get("PORT", "8080")
+		grpcPort  = env.Get("GRPC_PORT", "9090")
+		debug     = env.Get("DEBUG", "false") == "true"
+		otlp      = env.Get("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+		dsn       = env.Get("DATABASE_URL", "")
+		bankURL   = env.Get("BANK_URL", "http://bank.bank.svc.cluster.local")
+		kafkaAddr = env.Get("KAFKA_BROKERS", "")
 	)
 	if dsn == "" {
 		return errors.New("DATABASE_URL is required")
@@ -84,9 +86,17 @@ func run() error {
 	bank := bankclient.New(bankURL, 5*time.Second)
 	pay := store.New(pool)
 
+	// Kafka is optional here as everywhere: no broker means a nil publisher and
+	// every publish is a no-op.
+	var pub *events.Publisher
+	if brokers := events.Brokers(kafkaAddr); brokers != nil {
+		pub = events.NewPublisher(brokers, lg)
+		defer func() { _ = pub.Close() }()
+	}
+
 	grpcSrv := grpcx.NewServer(lg)
 	pb.RegisterPaymentsServiceServer(grpcSrv,
-		payments.NewServer(pay, bank, store.NewReconciler(pay, bank, time.Minute), lg))
+		payments.NewServer(pay, bank, store.NewReconciler(pay, bank, time.Minute), pub, lg))
 
 	// TWO LISTENERS, DELIBERATELY. gRPC serves the peers; a tiny HTTP server
 	// serves /livez and /readyz, because kubelet probes speak HTTP and wiring

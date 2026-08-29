@@ -31,7 +31,35 @@ const (
 	TopicSeatHeld     = "inventory.seat.held"
 	TopicSeatReleased = "inventory.seat.released"
 	TopicSeatSold     = "inventory.seat.sold"
+
+	// THE OTHER HALF OF THE ASYMMETRY, and the reason these exist at all.
+	//
+	// The inventory topics key by EVENT ID, so during an on-sale every message
+	// for one concert lands on ONE partition and the load does not spread at all.
+	// These key by ORDER ID, which spreads perfectly — orders are independent of
+	// each other and nothing needs cross-order ordering.
+	//
+	// Same cluster, same on-sale, one set of topics idle and one partition on
+	// fire. That contrast is what milestone 10 measures, and it only exists if
+	// both halves are produced.
+	TopicOrderCreated     = "orders.created"
+	TopicOrderConfirmed   = "orders.confirmed"
+	TopicOrderFailed      = "orders.failed"
+	TopicPaymentSucceeded = "payments.succeeded"
+	TopicPaymentFailed    = "payments.failed"
 )
+
+// OrderChange is what the orders.* and payments.* topics carry.
+type OrderChange struct {
+	OrderID     string    `json:"order_id"`
+	EventID     string    `json:"event_id,omitempty"`
+	HoldID      string    `json:"hold_id,omitempty"`
+	UserID      string    `json:"user_id,omitempty"`
+	AmountMinor int64     `json:"amount_minor,omitempty"`
+	State       string    `json:"state"`
+	Reason      string    `json:"reason,omitempty"`
+	At          time.Time `json:"at"`
+}
 
 // SeatChange is what every one of those topics carries.
 //
@@ -106,6 +134,30 @@ func (p *Publisher) Publish(ctx context.Context, topic string, c SeatChange) {
 		Value: body,
 	}); err != nil {
 		p.lg.Warn("seat change not queued", zap.String("topic", topic), zap.Error(err))
+	}
+}
+
+// PublishOrder sends an order or payment event, KEYED BY ORDER ID.
+//
+// The key is the whole point — see the topic constants. Using the event id here
+// would collapse the two halves of the experiment into one hot partition and
+// there would be nothing left to compare.
+func (p *Publisher) PublishOrder(ctx context.Context, topic string, c OrderChange) {
+	if p == nil || p.w == nil {
+		return
+	}
+	c.At = time.Now()
+	body, err := json.Marshal(c)
+	if err != nil {
+		p.lg.Warn("order change would not marshal", zap.Error(err))
+		return
+	}
+	if err := p.w.WriteMessages(ctx, kafka.Message{
+		Topic: topic,
+		Key:   []byte(c.OrderID),
+		Value: body,
+	}); err != nil {
+		p.lg.Warn("order change not queued", zap.String("topic", topic), zap.Error(err))
 	}
 }
 

@@ -11,11 +11,23 @@
 # simply wrong: dropping ZooKeeper removes an entire stateful ensemble. (The
 # ZooKeeper still running on node-2 belongs to ClickHouse, not to Kafka.)
 #
-# ONE NODE, dual-role: it is both controller and broker. Replication factor 1
-# everywhere, which buys no durability and is honest about that — a broker loss
-# loses the log. Three brokers with RF=3 and min.insync.replicas=2 come at
-# milestone 10, when ISR shrink and leader election are the thing being learned
-# rather than three times the disk for no lesson.
+# THREE NODES SINCE 2026-08-29 — milestone 10. It ran on one for months, RF=1,
+# which bought no durability and said so: a broker loss lost the log.
+#
+# It was blocked on disk, and the block is gone: cleaning up ClickHouse's own
+# diagnostics took node usage to 10G of 127G, so three 20Gi volumes are now
+# comfortable where they would once have been reckless.
+#
+# THE POINT IS NOT DURABILITY, it is having something to break. With RF=3 and
+# min.insync.replicas=2 a broker can be killed mid-on-sale and the cluster is
+# supposed to keep taking writes — ISR shrinks, a new leader is elected, and
+# producers either carry on or start failing. Which of those two happens, and
+# what the seat map does while it happens, is the thing being learned.
+#
+# min.insync.replicas=2 with RF=3 is the standard pairing: it tolerates ONE
+# broker down and refuses writes at two, which is the correct trade. Setting it
+# to 1 would accept writes into a single replica and quietly reintroduce exactly
+# the data loss three brokers were meant to remove.
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaNodePool
 metadata:
@@ -26,7 +38,7 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "4"
 spec:
-  replicas: 1
+  replicas: 3
   roles: [controller, broker]
   storage:
     type: jbod
@@ -76,13 +88,21 @@ spec:
         type: internal
         tls: false
     config:
-      # Single node, so every replication factor is 1. Stated explicitly because
-      # the defaults are 3 and the cluster would refuse to create internal topics.
-      offsets.topic.replication.factor: 1
-      transaction.state.log.replication.factor: 1
-      transaction.state.log.min.isr: 1
-      default.replication.factor: 1
-      min.insync.replicas: 1
+      # THREE BROKERS, SO EVERYTHING IS RF=3 WITH min.insync.replicas=2. That
+      # pairing tolerates one broker down and refuses writes at two, which is the
+      # correct trade — and it is the whole reason there are three: a broker can
+      # be killed mid-on-sale and the cluster should keep taking writes.
+      #
+      # THE INTERNAL TOPICS MATTER AS MUCH AS OURS. __consumer_offsets at RF=1
+      # would mean losing one broker loses every consumer's position, and the
+      # gateway would replay or skip seat changes on restart. It is easy to set
+      # the visible topics to 3 and leave these at 1, and the result is a cluster
+      # that looks replicated and is not.
+      offsets.topic.replication.factor: 3
+      transaction.state.log.replication.factor: 3
+      transaction.state.log.min.isr: 2
+      default.replication.factor: 3
+      min.insync.replicas: 2
 
       # RETENTION IS SET AT INSTALL, NOT AFTER THE FIRST DISK ALERT.
       #

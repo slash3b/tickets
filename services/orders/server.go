@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	pb "github.com/slash3b/tickets/gen/tickets/v1"
+	"github.com/slash3b/tickets/pkg/events"
 	"github.com/slash3b/tickets/services/orders/store"
 )
 
@@ -22,11 +23,21 @@ type Server struct {
 	store   *store.Store
 	saga    *store.Saga
 	resumer *store.Resumer
+	pub     *events.Publisher
 	lg      *zap.Logger
 }
 
-func NewServer(s *store.Store, saga *store.Saga, res *store.Resumer, lg *zap.Logger) *Server {
-	return &Server{store: s, saga: saga, resumer: res, lg: lg}
+func NewServer(s *store.Store, saga *store.Saga, res *store.Resumer, pub *events.Publisher, lg *zap.Logger) *Server {
+	return &Server{store: s, saga: saga, resumer: res, pub: pub, lg: lg}
+}
+
+// publish is fire-and-forget, after the fact. An order must never wait on a
+// broker to be told what happened to it.
+func (s *Server) publish(ctx context.Context, topic string, c events.OrderChange) {
+	if s.pub == nil {
+		return
+	}
+	s.pub.PublishOrder(ctx, topic, c)
 }
 
 func (s *Server) Place(ctx context.Context, req *pb.PlaceRequest) (*pb.PlaceResponse, error) {
@@ -51,6 +62,14 @@ func (s *Server) Place(ctx context.Context, req *pb.PlaceRequest) (*pb.PlaceResp
 		return nil, status.Error(codes.Internal, "could not create order")
 	}
 
+	base := events.OrderChange{
+		OrderID: o.ID.String(), EventID: eventID.String(), HoldID: holdID.String(),
+		UserID: userID.String(), AmountMinor: req.GetAmountMinor(),
+	}
+	created := base
+	created.State = "created"
+	s.publish(ctx, events.TopicOrderCreated, created)
+
 	// THE SAGA MAY LEGITIMATELY NOT FINISH, and that is not an error to the
 	// caller. An unknown payment leaves the order mid-flight for the resumer, and
 	// the honest answer is the state it actually reached — not a failure, which
@@ -64,6 +83,21 @@ func (s *Server) Place(ctx context.Context, req *pb.PlaceRequest) (*pb.PlaceResp
 	if err != nil {
 		state = "unknown"
 	}
+
+	// Only TERMINAL states get an event. An order that is still mid-saga will be
+	// finished by the resumer, and announcing "awaiting_payment" would be news
+	// about nothing — the interesting message is the one that says it ended.
+	switch state {
+	case "confirmed":
+		done := base
+		done.State = state
+		s.publish(ctx, events.TopicOrderConfirmed, done)
+	case "failed":
+		done := base
+		done.State = state
+		s.publish(ctx, events.TopicOrderFailed, done)
+	}
+
 	return &pb.PlaceResponse{OrderId: o.ID.String(), State: state}, nil
 }
 
