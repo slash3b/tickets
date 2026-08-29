@@ -6,4 +6,4 @@ resources:
 - deployment.yaml
 images:
 - name: ghcr.io/slash3b/tickets-bank
-  newTag: 3333faf58e20b4ef9c7e9fd82b604455004839fc
+  newTag: f8e8054ddbcbb7d0b145d3d331381c34ff1f5966
