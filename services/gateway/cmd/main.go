@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/slash3b/tickets/pkg/cache"
 	"github.com/slash3b/tickets/pkg/env"
 	"github.com/slash3b/tickets/pkg/events"
 	"github.com/slash3b/tickets/pkg/grpcx"
@@ -55,6 +56,7 @@ func run() error {
 		ordersAddr    = env.Get("ORDERS_ADDR", "orders.tickets.svc.cluster.local:9090")
 		holdTTL       = envDuration("HOLD_TTL", 5*time.Minute)
 		kafkaAddr     = env.Get("KAFKA_BROKERS", "")
+		redisAddr     = env.Get("REDIS_ADDR", "")
 	)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -103,13 +105,37 @@ func run() error {
 	// other five would never hear it. This is a broadcast, not a work queue.
 	//
 	// The hostname makes the id unique per pod, which is all that is needed.
+	// The Redis seat-map projection. Optional: without it every read goes to
+	// inventory, which is what happened before and still works.
+	seatCache := cache.New(redisAddr, lg)
+	defer func() { _ = seatCache.Close() }()
+	if seatCache != nil {
+		api = api.WithCache(seatCache)
+		if err := seatCache.Ping(ctx); err != nil {
+			// NOT FATAL. A cache that is down must cost latency and nothing else,
+			// which is the design's own test — so this is a warning at start-up
+			// rather than a refusal to boot.
+			lg.Warn("redis unreachable; serving seat maps from inventory",
+				zap.String("redis", redisAddr), zap.Error(err))
+		} else {
+			lg.Info("seat-map projection on", zap.String("redis", redisAddr))
+		}
+	}
+
 	if brokers := events.Brokers(kafkaAddr); brokers != nil {
 		api = api.WithStreaming(lg)
 		host, _ := os.Hostname()
 		groupID := "gateway-stream-" + host
 		events.Subscribe(ctx, brokers,
 			[]string{events.TopicSeatHeld, events.TopicSeatReleased, events.TopicSeatSold},
-			groupID, lg, func(_ string, c events.SeatChange) { api.Broadcast(c) })
+			groupID, lg, func(_ string, c events.SeatChange) {
+				// ONE STREAM, TWO CONSUMERS OF IT. The same message that reaches
+				// browsers also keeps the projection current — which is why adding
+				// a cache here introduced no new invalidation problem. The events
+				// that already had to exist are the invalidation.
+				seatCache.Apply(ctx, c.EventID, c.SeatIDs, c.Status)
+				api.Broadcast(c)
+			})
 		lg.Info("live seat map on", zap.String("kafka", kafkaAddr), zap.String("group", groupID))
 	}
 

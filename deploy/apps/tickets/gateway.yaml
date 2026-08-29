@@ -26,6 +26,7 @@ spec:
           env:
             - {name: PORT, value: "8080"}
             - {name: KAFKA_BROKERS, value: "tickets-kafka-kafka-bootstrap.data.svc.cluster.local:9092"}
+            - {name: REDIS_ADDR, value: "redis.data.svc.cluster.local:6379"}
             - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "signoz-otel-collector.signoz.svc.cluster.local:4318"}
             # Pod identity from the downward API. These MUST be declared before
             # OTEL_RESOURCE_ATTRIBUTES below, because Kubernetes only expands

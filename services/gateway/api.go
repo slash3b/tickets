@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/slash3b/tickets/pkg/cache"
 	"github.com/slash3b/tickets/pkg/obs"
 )
 
@@ -81,10 +82,18 @@ type API struct {
 	holdTTL   time.Duration
 	lg        *zap.Logger
 	hub       *hub
+	cache     *cache.Cache
 }
 
 func New(c Catalog, i Inventory, o Orders, holdTTL time.Duration, lg *zap.Logger) *API {
 	return &API{catalog: c, inventory: i, orders: o, holdTTL: holdTTL, lg: lg}
+}
+
+// WithCache turns on the Redis seat-map projection. A nil cache is fine and
+// means every read goes to inventory, which is what happened before this existed.
+func (a *API) WithCache(c *cache.Cache) *API {
+	a.cache = c
+	return a
 }
 
 // WithStreaming turns on the live seat map. Without it the API is exactly what it
@@ -189,22 +198,60 @@ func (a *API) sectionSeats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ids := make([]uuid.UUID, len(seats))
-	for i, s := range seats {
-		ids[i] = s.ID
-	}
-	statuses, err := a.inventory.SeatStatuses(r.Context(), eventID, ids)
+	statuses, err := a.seatStatuses(r.Context(), eventID, seats)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, "could not load availability")
 		return
 	}
 	for i := range seats {
-		if st, ok := statuses[seats[i].ID]; ok {
+		if st, ok := statuses[seats[i].ID.String()]; ok {
 			seats[i].Status = st
 		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"seats": seats})
+}
+
+// seatStatuses answers from the Redis projection when it can, and from inventory
+// when it cannot.
+//
+// THE CACHE IS NEVER THE TRUTH. Every miss falls through to inventory, and a
+// PARTIAL hit counts as a miss — a seat map missing three seats is not a stale
+// seat map, it is a wrong one. That is also what makes flushing Redis harmless:
+// everything is absent, so everything misses, and the only symptom is the latency
+// this exists to remove.
+//
+// It reads 2,000 rows from inventory.event_seats otherwise, which is the same
+// table every seat claim is contending on — so this is not only a read
+// optimisation, it takes browse traffic off the contended writer's rows.
+func (a *API) seatStatuses(ctx context.Context, eventID uuid.UUID, seats []Seat) (map[string]string, error) {
+	ids := make([]string, len(seats))
+	uuids := make([]uuid.UUID, len(seats))
+	for i, s := range seats {
+		ids[i] = s.ID.String()
+		uuids[i] = s.ID
+	}
+
+	if statuses, hit := a.cache.Statuses(ctx, eventID.String(), ids); hit {
+		return statuses, nil
+	}
+
+	fresh, err := a.inventory.SeatStatuses(ctx, eventID, uuids)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(fresh))
+	for id, st := range fresh {
+		out[id.String()] = st
+	}
+
+	// Populate for next time. A change that lands between the read above and this
+	// write would be overwritten by a value that is a few milliseconds stale — and
+	// that is acceptable here for the reason the whole seat map is allowed to be
+	// stale: the SSE stream corrects it immediately, and the worst outcome is a
+	// 409 on a hold, which is the ordinary path this system is built around.
+	a.cache.PutStatuses(ctx, eventID.String(), out)
+	return out, nil
 }
 
 type holdRequest struct {
