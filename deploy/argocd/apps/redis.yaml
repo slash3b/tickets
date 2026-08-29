@@ -1,0 +1,37 @@
+# Redis, split out of the `data` app on 2026-08-29.
+#
+# It used to be one resource inside `data` alongside Postgres and Kafka, which
+# meant three things you could not tell apart: the app's health was the worst of
+# the three, a change to any one synced all three, and Redis was invisible in the
+# application list — you had to know to open the tree.
+#
+# It also has a genuinely different lifecycle from the other two. Redis here is a
+# CACHE and nothing else: it has no PVC, losing it costs latency and no data, and
+# it can be restarted or emptied at will. Postgres and Kafka are the opposite on
+# every one of those counts. Sharing a sync boundary with them meant the safest
+# thing in the data plane could only be touched at the pace of the riskiest.
+#
+# Wave 4, same as `data`: nothing here depends on the other two, but the gateway
+# in wave 5 expects it to exist.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: redis
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/slash3b/tickets.git
+    targetRevision: main
+    path: deploy/redis
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: data
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions:
+      - ServerSideApply=true
