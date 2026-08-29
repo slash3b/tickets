@@ -100,6 +100,11 @@ func NewPublisher(brokers []string, lg *zap.Logger) *Publisher {
 			BatchTimeout: 50 * time.Millisecond,
 			RequiredAcks: kafka.RequireOne,
 			Completion: func(msgs []kafka.Message, err error) {
+				// Where every producer span ends. kafka-go fills Partition and
+				// Offset into each message just before calling this, which is the
+				// only place those are knowable for an async writer.
+				finishPublish(msgs, err)
+
 				if err != nil {
 					// Logged, never returned. Nobody is waiting for this and there
 					// is nothing useful to do about it in the request path.
@@ -128,16 +133,20 @@ func (p *Publisher) Publish(ctx context.Context, topic string, c SeatChange) {
 		p.lg.Warn("seat change would not marshal", zap.Error(err))
 		return
 	}
-	ctx, headers, end := startPublish(ctx, topic, c.EventID, len(body))
-	defer end()
+	ctx, headers, ps := startPublish(ctx, topic, c.EventID, len(body))
 
+	// The span is ENDED BY THE WRITER'S Completion CALLBACK, not here — that is
+	// the first moment the partition is known. If the message never gets queued
+	// at all, Completion will never see it, so it is ended here instead.
 	if err := p.w.WriteMessages(ctx, kafka.Message{
-		Topic:   topic,
-		Key:     []byte(c.EventID),
-		Value:   body,
-		Headers: headers,
+		Topic:      topic,
+		Key:        []byte(c.EventID),
+		Value:      body,
+		Headers:    headers,
+		WriterData: ps,
 	}); err != nil {
 		p.lg.Warn("seat change not queued", zap.String("topic", topic), zap.Error(err))
+		finishPublish([]kafka.Message{{WriterData: ps}}, err)
 	}
 }
 
@@ -156,16 +165,20 @@ func (p *Publisher) PublishOrder(ctx context.Context, topic string, c OrderChang
 		p.lg.Warn("order change would not marshal", zap.Error(err))
 		return
 	}
-	ctx, headers, end := startPublish(ctx, topic, c.OrderID, len(body))
-	defer end()
+	ctx, headers, ps := startPublish(ctx, topic, c.OrderID, len(body))
 
+	// The span is ENDED BY THE WRITER'S Completion CALLBACK, not here — that is
+	// the first moment the partition is known. If the message never gets queued
+	// at all, Completion will never see it, so it is ended here instead.
 	if err := p.w.WriteMessages(ctx, kafka.Message{
-		Topic:   topic,
-		Key:     []byte(c.OrderID),
-		Value:   body,
-		Headers: headers,
+		Topic:      topic,
+		Key:        []byte(c.OrderID),
+		Value:      body,
+		Headers:    headers,
+		WriterData: ps,
 	}); err != nil {
 		p.lg.Warn("order change not queued", zap.String("topic", topic), zap.Error(err))
+		finishPublish([]kafka.Message{{WriterData: ps}}, err)
 	}
 }
 

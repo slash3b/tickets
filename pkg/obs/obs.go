@@ -17,6 +17,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"strconv"
 	"time"
 
 	otelruntime "go.opentelemetry.io/contrib/instrumentation/runtime"
@@ -66,6 +68,16 @@ func Setup(ctx context.Context, service, version, endpoint string) (Shutdown, ot
 		resource.WithAttributes(
 			semconv.ServiceName(service),
 			semconv.ServiceVersion(version),
+			// WHICH REPLICA, not just which service. Six inventory pods all report
+			// service.name=inventory, and without this there is no way to ask
+			// "is it always the same pod that is slow" — the question you have the
+			// moment a service is scaled and one instance misbehaves.
+			//
+			// It is also required by SigNoz's Kafka view, which reported it
+			// missing. The hostname is the pod name in Kubernetes and the same
+			// string pkg/events uses as its Kafka client id, so a pod, its client
+			// and its telemetry all answer to one name.
+			semconv.ServiceInstanceID(instanceID()),
 		))
 	if err != nil {
 		return nil, nil, fmt.Errorf("otel resource: %w", err)
@@ -146,4 +158,17 @@ func Setup(ctx context.Context, service, version, endpoint string) (Shutdown, ot
 	return func(ctx context.Context) error {
 		return errors.Join(tp.Shutdown(ctx), mp.Shutdown(ctx), lp.Shutdown(ctx))
 	}, lp, nil
+}
+
+// instanceID names this process. The pod name in Kubernetes, the hostname
+// anywhere else, and a generated id if even that fails — an id that changes on
+// restart is still far better than every replica sharing one.
+func instanceID() string {
+	if pod := os.Getenv("POD_NAME"); pod != "" {
+		return pod
+	}
+	if h, err := os.Hostname(); err == nil && h != "" {
+		return h
+	}
+	return "unknown-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 }

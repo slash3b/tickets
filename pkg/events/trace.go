@@ -2,10 +2,13 @@ package events
 
 import (
 	"context"
+	"os"
+	"strconv"
 
 	"github.com/segmentio/kafka-go"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -26,6 +29,17 @@ import (
 // include the seat map update it caused.
 
 var tracer = otel.Tracer("events")
+
+// clientID identifies this process as a Kafka client. In Kubernetes the hostname
+// is the pod name, which is the granularity wanted here: one client per pod, and
+// the same string pkg/obs reports as service.instance.id.
+var clientID = func() string {
+	h, err := os.Hostname()
+	if err != nil || h == "" {
+		return "unknown"
+	}
+	return h
+}()
 
 // kafkaHeaders adapts Kafka's headers to the propagator's carrier interface.
 //
@@ -62,15 +76,24 @@ func (c kafkaHeaders) Keys() []string {
 	return out
 }
 
-// startPublish opens the producer span and returns the headers to send with the
-// message. Always call the returned end func.
+// publishSpan rides along with the message in kafka.Message.WriterData so the
+// writer's Completion callback can finish it.
 //
-// THE SPAN MEASURES THE ENQUEUE, NOT THE SEND, and that is not a mistake to fix
-// later. The writer is Async on purpose (see NewPublisher): a seat claim must
-// never wait on a broker. WriteMessages therefore returns as soon as the message
-// is buffered, so this span is honestly named for what it covers — how long the
-// request path paid for publishing, which is the number that matters here.
-func startPublish(ctx context.Context, topic, key string, size int) (context.Context, []kafka.Header, func()) {
+// THE SPAN CANNOT END AT WriteMessages. The writer is Async on purpose — a seat
+// claim must never wait on a broker — so WriteMessages returns as soon as the
+// message is buffered, and at that moment NOBODY KNOWS WHICH PARTITION it will
+// land on. The balancer chooses when the batch is built, and kafka-go fills
+// Topic, Partition and Offset into every message just before calling Completion.
+//
+// Ending it there costs nothing and buys two things: the span covers the real
+// send rather than the enqueue, and it can carry the partition — the attribute
+// the entire hot-partition question is about, and the one SigNoz's Kafka view
+// wants on a producer.
+type publishSpan struct{ span trace.Span }
+
+// startPublish opens the producer span and returns the headers to send with the
+// message plus the handle to hang on it. finishPublish ends it.
+func startPublish(ctx context.Context, topic, key string, size int) (context.Context, []kafka.Header, *publishSpan) {
 	ctx, span := tracer.Start(ctx, topic+" publish",
 		trace.WithSpanKind(trace.SpanKindProducer),
 		trace.WithAttributes(
@@ -78,13 +101,48 @@ func startPublish(ctx context.Context, topic, key string, size int) (context.Con
 			attribute.String("messaging.destination.name", topic),
 			attribute.String("messaging.operation", "publish"),
 			attribute.String("messaging.operation.name", "publish"),
+			attribute.String("messaging.client_id", clientID),
 			attribute.String("messaging.kafka.message.key", key),
 			attribute.Int("messaging.message.body.size", size),
 		))
 
 	var headers []kafka.Header
 	otel.GetTextMapPropagator().Inject(ctx, kafkaHeaders{&headers})
-	return ctx, headers, func() { span.End() }
+	return ctx, headers, &publishSpan{span: span}
+}
+
+// finishPublish ends the producer spans for one delivered batch, from the
+// writer's Completion callback — the first moment the partition is known.
+//
+// err belongs to the batch, so it applies to every message in it.
+func finishPublish(msgs []kafka.Message, err error) {
+	for _, m := range msgs {
+		ps, ok := m.WriterData.(*publishSpan)
+		if !ok || ps == nil || ps.span == nil {
+			continue
+		}
+		if err != nil {
+			ps.span.RecordError(err)
+			ps.span.SetStatus(codes.Error, "publish failed")
+		} else {
+			ps.span.SetAttributes(
+				partitionID(m.Partition),
+				attribute.Int64("messaging.kafka.message.offset", m.Offset),
+			)
+		}
+		ps.span.End()
+	}
+}
+
+// partitionID is a STRING, because the semantic convention says so.
+//
+// It was an attribute.Int here first, which put it in the numeric attribute map.
+// SigNoz's Kafka view reads the string map, so the attribute was present and
+// invisible at the same time and the page reported it missing — which is a much
+// better failure than it sounds, because the page said exactly which attribute
+// and exactly what was wrong with it.
+func partitionID(p int) attribute.KeyValue {
+	return attribute.String("messaging.destination.partition.id", strconv.Itoa(p))
 }
 
 // startConsume reopens the producer's trace on the other side of the broker and
@@ -105,9 +163,9 @@ func startConsume(ctx context.Context, m kafka.Message, group string) (context.C
 			attribute.String("messaging.destination.name", m.Topic),
 			attribute.String("messaging.operation", "process"),
 			attribute.String("messaging.operation.name", "process"),
+			attribute.String("messaging.client_id", clientID),
 			attribute.String("messaging.kafka.message.key", string(m.Key)),
-			attribute.Int("messaging.destination.partition.id", m.Partition),
-			attribute.Int("messaging.kafka.partition", m.Partition),
+			partitionID(m.Partition),
 			attribute.Int64("messaging.kafka.message.offset", m.Offset),
 			attribute.String("messaging.consumer.group.name", group),
 			attribute.String("messaging.kafka.consumer.group", group),

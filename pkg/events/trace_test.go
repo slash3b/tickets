@@ -6,8 +6,10 @@ import (
 
 	"github.com/segmentio/kafka-go"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -24,8 +26,9 @@ func TestTraceCrossesTheBroker(t *testing.T) {
 	root, rootSpan := otel.Tracer("test").Start(context.Background(), "request")
 	want := rootSpan.SpanContext().TraceID()
 
-	_, headers, endPublish := startPublish(root, "inventory.seat.sold", "evt-1", 42)
-	endPublish()
+	_, headers, ps := startPublish(root, "inventory.seat.sold", "evt-1", 42)
+	// Ended the way the writer ends it, with the partition the broker chose.
+	finishPublish([]kafka.Message{{Partition: 2, Offset: 99, WriterData: ps}}, nil)
 	rootSpan.End()
 
 	if len(headers) == 0 {
@@ -76,5 +79,62 @@ func TestMissingHeadersStartAFreshTrace(t *testing.T) {
 	defer end()
 	if ctx == nil {
 		t.Fatal("no context returned for an untraced message")
+	}
+}
+
+// TestPartitionIsAStringAttribute is a direct regression test for a bug that
+// looked like nothing at all.
+//
+// messaging.destination.partition.id was set with attribute.Int, so it landed in
+// the numeric attribute map. SigNoz's Kafka view reads the string map, so its
+// onboarding check reported the attribute missing while the code plainly set it.
+// The semantic convention specifies a string; the int was simply wrong.
+func TestPartitionIsAStringAttribute(t *testing.T) {
+	kv := partitionID(7)
+
+	if kv.Key != "messaging.destination.partition.id" {
+		t.Fatalf("key = %q", kv.Key)
+	}
+	if kv.Value.Type() != attribute.STRING {
+		t.Fatalf("partition id is a %v; the convention says STRING, and anything "+
+			"else lands in a map SigNoz does not read", kv.Value.Type())
+	}
+	if kv.Value.AsString() != "7" {
+		t.Fatalf("value = %q, want \"7\"", kv.Value.AsString())
+	}
+}
+
+// TestProducerSpanCarriesThePartition: the partition is only knowable once the
+// writer has built the batch, so the span has to survive until Completion. If it
+// ended at WriteMessages the producer would have no partition at all — which is
+// the one attribute the hot-partition question is about.
+func TestProducerSpanCarriesThePartition(t *testing.T) {
+	exp := tracetest.NewInMemoryExporter()
+	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSyncer(exp)))
+	tracer = otel.Tracer("events")
+
+	_, _, ps := startPublish(context.Background(), "orders.created", "order-1", 10)
+	if len(exp.GetSpans()) != 0 {
+		t.Fatal("the producer span ended at WriteMessages; the partition is not known yet")
+	}
+
+	finishPublish([]kafka.Message{{Partition: 2, Offset: 41, WriterData: ps}}, nil)
+
+	spans := exp.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want the producer span ended by Completion", len(spans))
+	}
+	got := map[string]string{}
+	for _, a := range spans[0].Attributes {
+		got[string(a.Key)] = a.Value.Emit()
+	}
+	if got["messaging.destination.partition.id"] != "2" {
+		t.Errorf("partition = %q, want \"2\"", got["messaging.destination.partition.id"])
+	}
+	if got["messaging.client_id"] == "" {
+		t.Error("no messaging.client_id — SigNoz reports it missing without one")
+	}
+	if spans[0].SpanKind != trace.SpanKindProducer {
+		t.Errorf("kind = %v, want producer", spans[0].SpanKind)
 	}
 }
