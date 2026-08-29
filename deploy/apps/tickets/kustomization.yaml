@@ -16,20 +16,20 @@ resources:
 - hpa.yaml
 images:
 - name: ghcr.io/slash3b/tickets-catalog
-  newTag: 36b48d935127b29905538dedc4e2b561ea7f6737
+  newTag: df93d5d1488b3ae81c013979cc1f562c28b20a0d
 - name: ghcr.io/slash3b/tickets-gateway
-  newTag: 36b48d935127b29905538dedc4e2b561ea7f6737
+  newTag: df93d5d1488b3ae81c013979cc1f562c28b20a0d
 - name: ghcr.io/slash3b/tickets-inventory
-  newTag: 36b48d935127b29905538dedc4e2b561ea7f6737
+  newTag: df93d5d1488b3ae81c013979cc1f562c28b20a0d
 - name: ghcr.io/slash3b/tickets-orders
-  newTag: 36b48d935127b29905538dedc4e2b561ea7f6737
+  newTag: df93d5d1488b3ae81c013979cc1f562c28b20a0d
 - name: ghcr.io/slash3b/tickets-payments
-  newTag: 36b48d935127b29905538dedc4e2b561ea7f6737
+  newTag: df93d5d1488b3ae81c013979cc1f562c28b20a0d
 - name: ghcr.io/slash3b/tickets-seeder
-  newTag: 36b48d935127b29905538dedc4e2b561ea7f6737
+  newTag: df93d5d1488b3ae81c013979cc1f562c28b20a0d
 - name: ghcr.io/slash3b/tickets-simulator
-  newTag: 36b48d935127b29905538dedc4e2b561ea7f6737
+  newTag: df93d5d1488b3ae81c013979cc1f562c28b20a0d
 - name: ghcr.io/slash3b/tickets-web
-  newTag: 36b48d935127b29905538dedc4e2b561ea7f6737
+  newTag: df93d5d1488b3ae81c013979cc1f562c28b20a0d
 - name: ghcr.io/slash3b/tickets-workers
-  newTag: 36b48d935127b29905538dedc4e2b561ea7f6737
+  newTag: df93d5d1488b3ae81c013979cc1f562c28b20a0d
