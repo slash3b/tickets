@@ -1120,9 +1120,32 @@ MILESTONES
      minute; blocking every purchase behind a message broker is a broken system.
      Both halves of that trade were visible in one run.
 
-     WHAT IS NOT YET MEASURED is the hot partition under a THREE-BROKER on-sale -
-     inventory.* on one partition against orders.* on three. The topics and the
-     brokers now exist to show it; the graph does not.
+     THE HOT PARTITION, MEASURED 2026-08-29. One on-sale, 3,000 buyers, 736
+     purchases. Both sets of topics carried an almost identical NUMBER of
+     messages and distributed them completely differently:
+
+       inventory.seat.held   781 messages   partition 0: 781    (100%)
+       inventory.seat.sold   736 messages   partition 0: 736    (100%)
+       orders.created        781 messages   261 / 263 / 257     (33 / 34 / 33%)
+       payments.succeeded    736 messages   248 / 250 / 238     (34 / 34 / 32%)
+
+     THE PARTITION KEY IS THE ENTIRE DIFFERENCE. Same cluster, same burst, same
+     volume. inventory keys by event_id and an on-sale is ONE event, so every
+     message lands on one partition and therefore one broker leader. orders keys
+     by order_id and orders are independent, so the load spreads within a
+     percentage point of even.
+
+     THIS IS WHY THE KEY IS A DESIGN DECISION AND NOT A DETAIL. At this volume
+     one partition is comfortable. The number that matters is not 781, it is that
+     inventory's share of ANY on-sale is 100% of one partition however large the
+     on-sale gets - the topic cannot spread, because there is only ever one event
+     being rushed.
+
+     THE THREE ANSWERS TO IT, still unchosen and now decidable with evidence:
+     key by (event_id, section_id) and lose cross-section ordering; put hot events
+     on a dedicated topic; or make the seat-map consumers commutative so ordering
+     stops mattering. Nothing needs choosing yet - the partition is not close to
+     saturated - and that is a better reason to defer than not having looked.
 
 Milestone 1 is deliberately unglamorous. If the seat-claim primitive is wrong, every
 milestone after it is built on sand, and it is far cheaper to find that out with a

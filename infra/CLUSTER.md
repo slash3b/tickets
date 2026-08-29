@@ -950,6 +950,13 @@ THE APPLICATION - DEPLOYED 2026-08-27
   AND kubectl exec NEEDS -i TO PIPE A FILE IN. Without it the file lands empty and
   the error you get back is about JSON parsing, a long way from the cause.
 
+  THE HOT PARTITION, MEASURED 2026-08-29 during a 3,000-buyer on-sale:
+    inventory.seat.held  781 msgs, ALL on partition 0
+    orders.created       781 msgs, 261/263/257 across three partitions
+  Same cluster, same burst, near-identical volume, opposite distribution - the
+  partition key is the whole of the difference. inventory keys by event_id and an
+  on-sale is one event; orders keys by order_id and orders are independent.
+
   BROKER FAILURE, TESTED FOR REAL 2026-08-29. Broker 1 deleted 25 seconds into a
   3,000-buyer on-sale. ISR went 1,2,0 -> 2,0 -> 0,1,2 within about twenty seconds,
   writes never stopped because two in-sync replicas still satisfy
