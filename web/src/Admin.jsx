@@ -16,7 +16,13 @@ const TAME = { decline_rate: 0.05, timeout_rate: 0.01 }
 
 export default function Admin() {
   const [events, setEvents] = useState([])
+  // Showings that exist but are not buyable yet. The select used to read only the
+  // on-sale list, so a freshly created showing was invisible for the ~55 seconds
+  // between creating it and the workers loop opening its seats — an empty box and
+  // no feedback, which reads as broken rather than as waiting.
+  const [upcoming, setUpcoming] = useState([])
   const [eventID, setEventID] = useState('')
+  const [now, setNow] = useState(Date.now())
   const [buyers, setBuyers] = useState(2000)
   const [over, setOver] = useState(20)
   const [firing, setFiring] = useState(false)
@@ -36,18 +42,51 @@ export default function Admin() {
   const [rows, setRows] = useState(50)
   const [perRow, setPerRow] = useState(40)
 
-  useEffect(() => {
-    ;(async () => {
-      try {
-        const r = await fetch('/api/events')
-        const { events } = await r.json()
-        setEvents(events ?? [])
-        if (events?.length) setEventID(events[0].id)
-      } catch (e) {
-        setMsg({ kind: 'err', text: `could not list events: ${e.message}` })
+  // The id we are waiting to go on sale, so it can be selected the moment it does
+  // without the operator hunting for it. A ref because the loader below reads it
+  // from inside an interval and must see the current value, not the one captured
+  // when the interval was created.
+  const awaiting = useRef('')
+
+  const loadEvents = useCallback(async () => {
+    try {
+      const [onSale, soon] = await Promise.all([
+        fetch('/api/events').then((r) => r.json()),
+        fetch('/api/events/upcoming').then((r) => r.json()),
+      ])
+      const live = onSale.events ?? []
+      setEvents(live)
+      setUpcoming(soon.events ?? [])
+
+      if (awaiting.current && live.some((e) => e.id === awaiting.current)) {
+        setEventID(awaiting.current)
+        awaiting.current = ''
+        setMsg({ kind: 'ok', text: 'the new showing is on sale and selected below' })
+        return
       }
-    })()
+      // Keep the operator's choice if it is still buyable; otherwise fall back to
+      // whatever is, which is also what recovers the box after a wipe.
+      setEventID((cur) => (live.some((e) => e.id === cur) ? cur : (live[0]?.id ?? '')))
+    } catch (e) {
+      setMsg({ kind: 'err', text: `could not list events: ${e.message}` })
+    }
   }, [])
+
+  useEffect(() => {
+    loadEvents()
+    // A steady refresh rather than an interval per create. The old code started a
+    // fresh setInterval inside stage(), so two creates ran two pollers and
+    // navigating away left them running.
+    const t = setInterval(loadEvents, 5000)
+    return () => clearInterval(t)
+  }, [loadEvents])
+
+  // Only ticks while something is actually counting down.
+  useEffect(() => {
+    if (!upcoming.length) return
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [upcoming.length])
 
   // THE SLIDERS USED TO BE WRITE-ONLY. They rendered whatever this component's
   // initial state said, so after a reload the page claimed a tame 5% while the
@@ -172,21 +211,11 @@ export default function Admin() {
       setStaged(s)
       setMsg({ kind: 'ok', text: `${s.title} created — ${s.seats} seats at ${s.venue}, on sale in ${onSaleIn}s` })
 
-      // Pick it up as soon as it is buyable, so Fire targets it without anyone
-      // having to hunt for the id.
-      const poll = setInterval(async () => {
-        try {
-          const rr = await fetch('/api/events')
-          const { events } = await rr.json()
-          if (events?.some((e) => e.id === s.event_id)) {
-            setEvents(events)
-            setEventID(s.event_id)
-            setMsg({ kind: 'ok', text: `${s.title} is ON SALE — ${s.seats} seats` })
-            clearInterval(poll)
-          }
-        } catch { /* keep waiting */ }
-      }, 3000)
-      setTimeout(() => clearInterval(poll), 10 * 60 * 1000)
+      // REFRESH IMMEDIATELY. The showing is already in the upcoming list, so this
+      // is what puts it in the select the instant it is created instead of a
+      // minute later. The steady loader above then selects it when it goes live.
+      awaiting.current = s.event_id
+      await loadEvents()
     } catch (e) {
       setMsg({ kind: 'err', text: e.message })
     } finally {
@@ -311,8 +340,21 @@ export default function Admin() {
           <label>
             event
             <select value={eventID} onChange={(e) => setEventID(e.target.value)}>
+              {!events.length && (
+                <option value="">
+                  {upcoming.length ? 'nothing on sale yet' : 'no showings — create one above'}
+                </option>
+              )}
               {events.map((e) => (
                 <option key={e.id} value={e.id}>{e.title} — {e.venue}</option>
+              ))}
+              {/* Not selectable, because there is nothing to fire buyers at until
+                  inventory has seats. Listed anyway so the showing you just made
+                  is visible where you are looking for it. */}
+              {upcoming.map((e) => (
+                <option key={e.id} value="" disabled>
+                  {e.title} — on sale {until(new Date(e.on_sale_at).getTime() - now)}
+                </option>
               ))}
             </select>
           </label>
@@ -331,6 +373,13 @@ export default function Admin() {
           </button>
         </div>
         {ev && <p className="hint">target: {ev.title} at {ev.venue}</p>}
+        {!ev && upcoming.length > 0 && (
+          <p className="hint">
+            Waiting for seats to open. A showing is buyable once the workers loop
+            has told inventory about it, which is up to 30s after its on-sale time
+            — it will be selected here automatically.
+          </p>
+        )}
 
         {result && (
           <div className="counts">
@@ -389,4 +438,13 @@ export default function Admin() {
       {msg && <div className={`msg ${msg.kind} standalone`}>{msg.text}</div>}
     </div>
   )
+}
+
+// until formats a countdown the same way the shop's upcoming list does.
+function until(ms) {
+  if (ms <= 0) return 'any moment'
+  const s = Math.ceil(ms / 1000)
+  if (s < 60) return `in ${s}s`
+  const m = Math.floor(s / 60)
+  return `in ${m}m ${String(s % 60).padStart(2, '0')}s`
 }
