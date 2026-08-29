@@ -20,11 +20,23 @@ import (
 // will. Without this the panel is permanently empty for a reason that has nothing
 // to do with the system being unhealthy.
 //
-// It is the same measurement, taken by the client instead of read off an MBean:
-// kafka-go times each fetch round trip and reports the average in
-// ReaderStats.ReadTime.Avg. Milliseconds, because that is the unit the JMX metric
-// this stands in for uses, and a panel built for one and fed the other is worse
-// than no panel.
+// It is the same measurement, taken by the client instead of read off an MBean.
+//
+// THE FIELD IS WaitTime, NOT ReadTime, AND THE DIFFERENCE IS THE WHOLE METRIC.
+// kafka-go splits one fetch into two timings: WaitTime is the round trip, from
+// issuing the fetch to the broker answering, and ReadTime is the LOCAL work of
+// decoding messages out of the batch that came back. ReadTime was the first
+// choice here and reported 0.01ms — ten microseconds for a network call, which is
+// the number telling you it is measuring the wrong thing. WaitTime is the
+// analogue of the JMX metric.
+//
+// AN IDLE CONSUMER WILL SHOW ~MaxWait (250ms), because a fetch with no data to
+// return blocks until the broker gives up. The JMX metric behaves the same way —
+// fetch-latency-avg includes fetch.max.wait.ms — so this is faithful rather than
+// broken. Read it as "how long fetches took", not "how loaded the broker is".
+//
+// Milliseconds, because that is the unit the JMX metric this stands in for uses,
+// and a panel built for one and fed the other is worse than no panel.
 //
 // Stats() SNAPSHOTS AND RESETS, so the average covers the interval since the last
 // collection rather than all time — which is what an "avg" gauge should show, and
@@ -100,10 +112,11 @@ func registerFetchLatency(lg *zap.Logger) {
 				attribute.String("messaging.kafka.consumer.group", t.group),
 				attribute.String("messaging.client_id", clientID),
 			)
-			// Only report a latency when a fetch actually happened. A quiet topic
-			// would otherwise report 0ms and read as an impossibly fast broker.
-			if s.ReadTime.Count > 0 {
-				o.ObserveFloat64(avg, float64(s.ReadTime.Avg.Microseconds())/1000, attrs)
+			// Only report when a fetch actually happened. A topic that saw none in
+			// the interval would otherwise report 0ms and read as an impossibly
+			// fast broker rather than as no data.
+			if s.WaitTime.Count > 0 {
+				o.ObserveFloat64(avg, float64(s.WaitTime.Avg.Microseconds())/1000, attrs)
 			}
 			o.ObserveInt64(lag, s.Lag, attrs)
 		}
