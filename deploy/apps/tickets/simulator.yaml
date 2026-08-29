@@ -89,6 +89,12 @@ spec:
   rules:
     - matches:
         - path: {type: PathPrefix, value: /}
+      # An on-sale rehearsal answers only when the last buyer is done, which is
+      # minutes for a big one. Envoy's default route timeout is 15 SECONDS, and
+      # the first 2000-buyer burst died on it exactly.
+      timeouts:
+        request: 900s
+        backendRequest: 900s
       backendRefs:
         - group: ""
           kind: Service

@@ -135,7 +135,24 @@ func run() error {
 			zap.Int("buyers", req.Buyers),
 			zap.Float64("over_seconds", req.OverSeconds))
 
-		res := sim.Burst(r.Context(), req.EventID, req.Buyers,
+		// THE EXPERIMENT MUST OUTLIVE THE REQUEST. The first 2000-buyer run died
+		// at exactly 15 seconds — Envoy's default route timeout — and because the
+		// burst was running on r.Context(), the client disconnect CANCELLED IT
+		// MID-FLIGHT: 365 seats sold instead of the full run, and five holds left
+		// dangling for the sweeper. A proxy hanging up must not be able to abort
+		// an on-sale rehearsal halfway; that produces a measurement of nothing and
+		// leaves the system in a state nobody asked for.
+		//
+		// WithoutCancel keeps the trace context — so the burst stays one trace —
+		// while dropping the cancellation. The deadline below is the experiment's
+		// own, generous enough for a long window and finite so a wedged run cannot
+		// hold goroutines forever.
+		burstCtx, cancel := context.WithTimeout(
+			context.WithoutCancel(r.Context()),
+			time.Duration(req.OverSeconds*float64(time.Second))+10*time.Minute)
+		defer cancel()
+
+		res := sim.Burst(burstCtx, req.EventID, req.Buyers,
 			time.Duration(req.OverSeconds*float64(time.Second)), req.GroupShare)
 
 		lg.Warn("ON-SALE DONE",
