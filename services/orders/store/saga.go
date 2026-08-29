@@ -77,7 +77,7 @@ func (sg *Saga) Run(ctx context.Context, orderID uuid.UUID) error {
 
 	// The step the loop was last in, so a failure can say where it died. Read by
 	// the deferred metric below, which runs after the loop has exited.
-	lastStep := string(o.State)
+	lastState := o.State
 
 	// The state it finishes in is the one thing every reader wants, and it is only
 	// known once the loop stops.
@@ -92,7 +92,7 @@ func (sg *Saga) Run(ctx context.Context, orderID uuid.UUID) error {
 		// "the bank is down" or "holds are expiring before checkout".
 		attrs := []attribute.KeyValue{attribute.String("state", string(o.State))}
 		if o.State == StateFailed {
-			attrs = append(attrs, attribute.String("failed_at", lastStep))
+			attrs = append(attrs, attribute.String("failed_at", before2step(lastState)))
 		}
 		orders.Add(ctx, 1, metric.WithAttributes(attrs...))
 
@@ -104,7 +104,7 @@ func (sg *Saga) Run(ctx context.Context, orderID uuid.UUID) error {
 
 	for {
 		before := o.State
-		lastStep = string(o.State)
+		lastState = o.State
 
 		// One span per STEP, named after the state being left. This is where the
 		// forward-recovery gap becomes visible: a trace that stops at "paid" with
