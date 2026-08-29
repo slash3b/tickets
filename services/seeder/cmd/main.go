@@ -228,8 +228,11 @@ func concert(ctx context.Context, lg *zap.Logger, cat *catalog.Client) error {
 	if err != nil {
 		return fmt.Errorf("list sections: %w", err)
 	}
-	for _, sec := range secs {
-		if err := cat.SetPrice(ctx, mustID(event.GetId()), mustID(sec.GetId()), 9500); err != nil {
+	// Tiered by position — see catalog.TierFor. Every block at one price made the
+	// rush spread evenly, which is the one thing a real on-sale does not do.
+	for i, sec := range secs {
+		tier := catalog.TierFor(i, len(secs), false)
+		if err := cat.SetPrice(ctx, mustID(event.GetId()), mustID(sec.GetId()), tier.PriceMinor); err != nil {
 			return fmt.Errorf("set price: %w", err)
 		}
 	}

@@ -76,11 +76,11 @@ func (a *Admin) createShowing(w http.ResponseWriter, r *http.Request) {
 		req.Title = fmt.Sprintf("On-Sale %s", time.Now().Format("15:04:05"))
 	}
 
-	venueName, rows, perRow, sections, price := arenaName, 50, 40, 10, int64(9500)
+	venueName, rows, perRow, sections, cinema := arenaName, 50, 40, 10, false
 	switch req.Venue {
 	case "", "arena":
 	case "cinema":
-		venueName, rows, perRow, sections, price = cinemaName, 8, 12, 1, 1200
+		venueName, rows, perRow, sections, cinema = cinemaName, 8, 12, 1, true
 	default:
 		fail(w, http.StatusBadRequest, "venue must be arena or cinema")
 		return
@@ -114,13 +114,18 @@ func (a *Admin) createShowing(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, "could not read sections")
 		return
 	}
+	// TIERED BY POSITION. Sections come back in display order, so the first third
+	// is the floor and the last third the gods. A flat price made every block
+	// equally attractive, which spreads a rush evenly — and a real on-sale is not
+	// even, it is a fight over the front.
 	seats := 0
-	for _, s := range secs {
+	for i, s := range secs {
 		id, err := uuid.Parse(s.GetId())
 		if err != nil {
 			continue
 		}
-		if err := a.catalog.SetPrice(ctx, eventID, id, price); err != nil {
+		tier := catalog.TierFor(i, len(secs), cinema)
+		if err := a.catalog.SetPrice(ctx, eventID, id, tier.PriceMinor); err != nil {
 			a.lg.Warn("could not price a section", zap.Error(err))
 		}
 		seats += int(s.GetSeats())

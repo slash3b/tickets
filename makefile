@@ -26,9 +26,9 @@ test: ## unit tests. Needs DATABASE_URL for the store tests; skips them without 
 ## It fires 1000 concurrent goroutines at a database — a load test wearing a unit
 ## test's clothes. Run it deliberately, after changing the claim primitive, and
 ## read the throughput line rather than just the pass/fail.
-oversell: ## MANUAL: 1000 goroutines vs 10 seats, proves no oversell
+oversell: ## MANUAL: 1000 goroutines vs 10 seats, at the store AND over gRPC
 	DATABASE_URL="$(PG_URL)" go test -tags oversell -race -count=1 -v -timeout=5m \
-		./services/inventory/store/
+		./services/inventory/store/ ./services/inventory/oversell/
 
 pg-up: ## start a throwaway Postgres for tests
 	@docker rm -f $(PG_CONTAINER) >/dev/null 2>&1 || true
