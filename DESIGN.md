@@ -1147,6 +1147,39 @@ MILESTONES
      stops mattering. Nothing needs choosing yet - the partition is not close to
      saturated - and that is a better reason to defer than not having looked.
 
+  11 a name on every trace.                                   DONE 2026-08-29
+     A trace id answers "what happened in this request". It does not answer "what
+     happened to THAT PERSON", and that is the question you actually have during
+     an on-sale, when somebody says the seat they clicked disappeared.
+
+     ONE HEADER, SEEDED AT THE ONLY DOOR IN. X-Customer-Id arrives at the gateway
+     and nowhere else; obs.Route puts it into OTel BAGGAGE, and baggage is the one
+     part of the context that crosses a process boundary by itself. Every gRPC
+     server then tags its own spans from the baggage it was handed, so the id
+     appears on catalog, inventory, orders and payments without any of them taking
+     a parameter for it or knowing the header exists.
+
+     THE VALUE IS SANITISED BECAUSE THE CALLER SUPPLIES IT. Baggage is a header
+     with its own grammar - a comma, semicolon or equals in the value does not
+     corrupt one span, it corrupts the header for every downstream hop of every
+     service. [A-Za-z0-9._-], 64 bytes, drop the rest.
+
+     THE BROWSER GETS ONE TOO, ui-<8 chars> in localStorage so it survives a
+     reload, shown in the corner of the page and copyable, because the point of
+     the whole exercise is to be able to paste it into SigNoz. The simulator gives
+     each session sim-<profile>-<8 chars>, which makes the buyer profiles filterable
+     in the trace list rather than only in the code.
+
+     A BURST IS NOT ONE TRACE. Thirty buyers under one span produced a 1,177-span
+     trace that no UI can draw and no human can read, and it was also a lie: those
+     buyers are independent, competing sessions, not one operation. Each session
+     now starts with trace.WithNewRoot() and a LINK back to the burst span, so the
+     rehearsal is still one thing to click on while each buyer is its own trace.
+
+     VERIFIED IN THE CLUSTER: one purchase carried ui-slash3b-demo across five
+     services and onto every log line; a 30-buyer burst produced 30 customers, 30
+     traces, and a largest trace of 98 spans - one buyer's saga, not everyone's.
+
 Milestone 1 is deliberately unglamorous. If the seat-claim primitive is wrong, every
 milestone after it is built on sand, and it is far cheaper to find that out with a
 goroutine test than with a simulator and seven deployments in the way.

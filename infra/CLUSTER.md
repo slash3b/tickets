@@ -1,5 +1,5 @@
 HOMELAB KUBERNETES - STATE OF THE CLUSTER
-Snapshot 2026-08-27, taken from k8s-ctrl-plane (192.168.1.116).
+Snapshot 2026-08-29, taken from k8s-ctrl-plane (192.168.1.116).
 Changes made 2026-08-23/24: cineplex removed, slash3b account added, Argo CD 3.0.6 -> 3.5.1.
 2026-08-24: CLEAN SLATE. All observability leftovers deleted - 2 PVCs, 13 CRDs, 4 empty
 namespaces, 3 helm repos, stale images on every node. Disk 83/50/43% -> 47/29/16%, ~30G
@@ -622,6 +622,22 @@ OBSERVABILITY - SIGNOZ, INSTALLED 2026-08-24
   obs.Route now logs one line per request, inside otelhttp's handler so the
   context already has the span. After: gateway 143 of 147 lines correlated - the
   four without are startup, which is correct.
+
+  CUSTOMER ID IN TRACES AND LOGS, 2026-08-29. X-Customer-Id is read at the gateway
+  only, put into OTel baggage there, and picked up by every gRPC server it reaches.
+  In SigNoz filter spans on customer.id and logs on customer_id.
+
+    ui-<8 chars>              the browser, kept in localStorage, shown in the page
+    sim-<profile>-<8 chars>   one per simulator session
+
+  BAGGAGE IS A HEADER, so the value is sanitised to [A-Za-z0-9._-] and 64 bytes at
+  the gateway. An unescaped comma or semicolon would not spoil one span, it would
+  break the baggage header for every downstream hop.
+
+  Verified: one purchase as ui-slash3b-demo tagged spans on gateway, catalog,
+  inventory, orders and payments, and every log line for it. A 30-buyer burst
+  produced 30 distinct customers in 30 distinct traces, each linked back to the
+  on-sale burst span rather than nested under it.
 
   The seeder was worse. It passed nil as the log provider and never called
   obs.Setup at all, and its manifest had no OTLP endpoint, so the one job that
