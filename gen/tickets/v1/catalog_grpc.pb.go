@@ -20,6 +20,9 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	CatalogService_ListOnSale_FullMethodName            = "/tickets.v1.CatalogService/ListOnSale"
+	CatalogService_ListUpcoming_FullMethodName          = "/tickets.v1.CatalogService/ListUpcoming"
+	CatalogService_ListDueForOnSale_FullMethodName      = "/tickets.v1.CatalogService/ListDueForOnSale"
+	CatalogService_MarkSeatsOpened_FullMethodName       = "/tickets.v1.CatalogService/MarkSeatsOpened"
 	CatalogService_GetEvent_FullMethodName              = "/tickets.v1.CatalogService/GetEvent"
 	CatalogService_ListSections_FullMethodName          = "/tickets.v1.CatalogService/ListSections"
 	CatalogService_ListSectionSeats_FullMethodName      = "/tickets.v1.CatalogService/ListSectionSeats"
@@ -42,6 +45,13 @@ const (
 // completely different rates for completely different reasons.
 type CatalogServiceClient interface {
 	ListOnSale(ctx context.Context, in *ListOnSaleRequest, opts ...grpc.CallOption) (*ListOnSaleResponse, error)
+	// Events that have NOT gone on sale yet. A concert is advertised long before
+	// anyone can buy a seat, and ListOnSale deliberately hides it until then.
+	ListUpcoming(ctx context.Context, in *ListUpcomingRequest, opts ...grpc.CallOption) (*ListUpcomingResponse, error)
+	// The on-sale queue: events whose moment has arrived and whose seats inventory
+	// has not been told about. Driven by workers, not by any request path.
+	ListDueForOnSale(ctx context.Context, in *ListDueForOnSaleRequest, opts ...grpc.CallOption) (*ListDueForOnSaleResponse, error)
+	MarkSeatsOpened(ctx context.Context, in *MarkSeatsOpenedRequest, opts ...grpc.CallOption) (*MarkSeatsOpenedResponse, error)
 	GetEvent(ctx context.Context, in *GetEventRequest, opts ...grpc.CallOption) (*GetEventResponse, error)
 	ListSections(ctx context.Context, in *ListSectionsRequest, opts ...grpc.CallOption) (*ListSectionsResponse, error)
 	ListSectionSeats(ctx context.Context, in *ListSectionSeatsRequest, opts ...grpc.CallOption) (*ListSectionSeatsResponse, error)
@@ -68,6 +78,36 @@ func (c *catalogServiceClient) ListOnSale(ctx context.Context, in *ListOnSaleReq
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListOnSaleResponse)
 	err := c.cc.Invoke(ctx, CatalogService_ListOnSale_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *catalogServiceClient) ListUpcoming(ctx context.Context, in *ListUpcomingRequest, opts ...grpc.CallOption) (*ListUpcomingResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListUpcomingResponse)
+	err := c.cc.Invoke(ctx, CatalogService_ListUpcoming_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *catalogServiceClient) ListDueForOnSale(ctx context.Context, in *ListDueForOnSaleRequest, opts ...grpc.CallOption) (*ListDueForOnSaleResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListDueForOnSaleResponse)
+	err := c.cc.Invoke(ctx, CatalogService_ListDueForOnSale_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *catalogServiceClient) MarkSeatsOpened(ctx context.Context, in *MarkSeatsOpenedRequest, opts ...grpc.CallOption) (*MarkSeatsOpenedResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MarkSeatsOpenedResponse)
+	err := c.cc.Invoke(ctx, CatalogService_MarkSeatsOpened_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -193,6 +233,13 @@ func (c *catalogServiceClient) AddSection(ctx context.Context, in *AddSectionReq
 // completely different rates for completely different reasons.
 type CatalogServiceServer interface {
 	ListOnSale(context.Context, *ListOnSaleRequest) (*ListOnSaleResponse, error)
+	// Events that have NOT gone on sale yet. A concert is advertised long before
+	// anyone can buy a seat, and ListOnSale deliberately hides it until then.
+	ListUpcoming(context.Context, *ListUpcomingRequest) (*ListUpcomingResponse, error)
+	// The on-sale queue: events whose moment has arrived and whose seats inventory
+	// has not been told about. Driven by workers, not by any request path.
+	ListDueForOnSale(context.Context, *ListDueForOnSaleRequest) (*ListDueForOnSaleResponse, error)
+	MarkSeatsOpened(context.Context, *MarkSeatsOpenedRequest) (*MarkSeatsOpenedResponse, error)
 	GetEvent(context.Context, *GetEventRequest) (*GetEventResponse, error)
 	ListSections(context.Context, *ListSectionsRequest) (*ListSectionsResponse, error)
 	ListSectionSeats(context.Context, *ListSectionSeatsRequest) (*ListSectionSeatsResponse, error)
@@ -217,6 +264,15 @@ type UnimplementedCatalogServiceServer struct{}
 
 func (UnimplementedCatalogServiceServer) ListOnSale(context.Context, *ListOnSaleRequest) (*ListOnSaleResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListOnSale not implemented")
+}
+func (UnimplementedCatalogServiceServer) ListUpcoming(context.Context, *ListUpcomingRequest) (*ListUpcomingResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListUpcoming not implemented")
+}
+func (UnimplementedCatalogServiceServer) ListDueForOnSale(context.Context, *ListDueForOnSaleRequest) (*ListDueForOnSaleResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListDueForOnSale not implemented")
+}
+func (UnimplementedCatalogServiceServer) MarkSeatsOpened(context.Context, *MarkSeatsOpenedRequest) (*MarkSeatsOpenedResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method MarkSeatsOpened not implemented")
 }
 func (UnimplementedCatalogServiceServer) GetEvent(context.Context, *GetEventRequest) (*GetEventResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetEvent not implemented")
@@ -286,6 +342,60 @@ func _CatalogService_ListOnSale_Handler(srv interface{}, ctx context.Context, de
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(CatalogServiceServer).ListOnSale(ctx, req.(*ListOnSaleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CatalogService_ListUpcoming_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListUpcomingRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CatalogServiceServer).ListUpcoming(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CatalogService_ListUpcoming_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CatalogServiceServer).ListUpcoming(ctx, req.(*ListUpcomingRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CatalogService_ListDueForOnSale_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListDueForOnSaleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CatalogServiceServer).ListDueForOnSale(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CatalogService_ListDueForOnSale_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CatalogServiceServer).ListDueForOnSale(ctx, req.(*ListDueForOnSaleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CatalogService_MarkSeatsOpened_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MarkSeatsOpenedRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CatalogServiceServer).MarkSeatsOpened(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CatalogService_MarkSeatsOpened_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CatalogServiceServer).MarkSeatsOpened(ctx, req.(*MarkSeatsOpenedRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -498,6 +608,18 @@ var CatalogService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListOnSale",
 			Handler:    _CatalogService_ListOnSale_Handler,
+		},
+		{
+			MethodName: "ListUpcoming",
+			Handler:    _CatalogService_ListUpcoming_Handler,
+		},
+		{
+			MethodName: "ListDueForOnSale",
+			Handler:    _CatalogService_ListDueForOnSale_Handler,
+		},
+		{
+			MethodName: "MarkSeatsOpened",
+			Handler:    _CatalogService_MarkSeatsOpened_Handler,
 		},
 		{
 			MethodName: "GetEvent",

@@ -18,6 +18,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/google/uuid"
 	"net/http"
 	"os"
 	"os/signal"
@@ -29,6 +31,7 @@ import (
 	"github.com/slash3b/tickets/pkg/health"
 	"github.com/slash3b/tickets/pkg/logger"
 	"github.com/slash3b/tickets/pkg/obs"
+	"github.com/slash3b/tickets/services/catalog"
 	"github.com/slash3b/tickets/services/inventory"
 	"github.com/slash3b/tickets/services/orders"
 	"github.com/slash3b/tickets/services/payments"
@@ -54,6 +57,7 @@ func run() error {
 		port          = env.Get("PORT", "8080")
 		debug         = env.Get("DEBUG", "false") == "true"
 		otlp          = env.Get("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+		catalogAddr   = env.Get("CATALOG_ADDR", "catalog.tickets.svc.cluster.local:9090")
 		inventoryAddr = env.Get("INVENTORY_ADDR", "inventory.tickets.svc.cluster.local:9090")
 		ordersAddr    = env.Get("ORDERS_ADDR", "orders.tickets.svc.cluster.local:9090")
 		paymentsAddr  = env.Get("PAYMENTS_ADDR", "payments.tickets.svc.cluster.local:9090")
@@ -72,7 +76,8 @@ func run() error {
 
 	conns := map[string]*grpc.ClientConn{}
 	for name, addr := range map[string]string{
-		"inventory": inventoryAddr, "orders": ordersAddr, "payments": paymentsAddr,
+		"catalog": catalogAddr, "inventory": inventoryAddr,
+		"orders": ordersAddr, "payments": paymentsAddr,
 	} {
 		conn, err := grpcx.Dial(addr)
 		if err != nil {
@@ -82,9 +87,20 @@ func run() error {
 		conns[name] = conn
 	}
 
+	cat := catalog.NewClient(conns["catalog"])
 	inv := inventory.NewClient(conns["inventory"])
 	ord := orders.NewClient(conns["orders"])
 	pay := payments.NewClient(conns["payments"])
+
+	// THE ON-SALE LOOP. Opening an event's seats IS its on-sale: before this runs
+	// there are no rows in inventory.event_seats, so every hold fails on its own
+	// and no code anywhere checks a clock on the hot path.
+	//
+	// It ticks faster than the others because the gap between on_sale_at and the
+	// sale actually starting is the one delay a customer sees.
+	go loop(ctx, lg, "onsale", 5*time.Second, func(ctx context.Context) (string, error) {
+		return openDue(ctx, lg, cat, inv)
+	})
 
 	go loop(ctx, lg, "sweep", every, func(ctx context.Context) (string, error) {
 		expired, hard, err := inv.Sweep(ctx)
@@ -130,6 +146,52 @@ func run() error {
 	drain, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	return errors.Join(srv.Shutdown(drain), shutdownObs(drain))
+}
+
+// openDue starts any sale whose moment has arrived.
+//
+// ORDER MATTERS AND IT IS DELIBERATE: ask inventory to open the seats FIRST, and
+// only mark the event opened once inventory has confirmed. If the process dies
+// in between, the event stays in the queue and the next tick opens it again —
+// which is free, because OpenEvent is idempotent. The other order would risk
+// recording a sale as started that never was, and nothing would ever retry it.
+func openDue(ctx context.Context, lg *zap.Logger, cat *catalog.Client, inv *inventory.Client) (string, error) {
+	due, err := cat.ListDueForOnSale(ctx, 10)
+	if err != nil {
+		return "", err
+	}
+	if len(due) == 0 {
+		return "none due", nil
+	}
+
+	opened := 0
+	for _, e := range due {
+		id, err := uuid.Parse(e.GetId())
+		if err != nil {
+			return "", fmt.Errorf("catalog returned a malformed event id %q: %w", e.GetId(), err)
+		}
+
+		seatIDs, err := cat.SeatIDsForEvent(ctx, id)
+		if err != nil {
+			return "", fmt.Errorf("seat ids for %s: %w", id, err)
+		}
+		n, err := inv.OpenEvent(ctx, id, seatIDs)
+		if err != nil {
+			return "", fmt.Errorf("open %s: %w", id, err)
+		}
+		if err := cat.MarkSeatsOpened(ctx, id); err != nil {
+			return "", fmt.Errorf("mark opened %s: %w", id, err)
+		}
+
+		// The one line that says a sale just started. Worth INFO even though this
+		// loop is otherwise silent: it is the moment everything else reacts to.
+		lg.Info("on sale",
+			zap.String("event_id", id.String()),
+			zap.String("title", e.GetTitle()),
+			zap.Int("seats", n))
+		opened++
+	}
+	return fmt.Sprintf("opened=%d", opened), nil
 }
 
 // loop runs one pass every interval until ctx is done.

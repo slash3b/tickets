@@ -30,6 +30,21 @@ func (c *Client) ListOnSale(ctx context.Context, limit int) ([]*pb.Event, error)
 	return resp.GetEvents(), err
 }
 
+func (c *Client) ListUpcoming(ctx context.Context, limit int) ([]*pb.Event, error) {
+	resp, err := c.c.ListUpcoming(ctx, &pb.ListUpcomingRequest{Limit: int32(limit)})
+	return resp.GetEvents(), err
+}
+
+func (c *Client) ListDueForOnSale(ctx context.Context, limit int) ([]*pb.Event, error) {
+	resp, err := c.c.ListDueForOnSale(ctx, &pb.ListDueForOnSaleRequest{Limit: int32(limit)})
+	return resp.GetEvents(), err
+}
+
+func (c *Client) MarkSeatsOpened(ctx context.Context, eventID uuid.UUID) error {
+	_, err := c.c.MarkSeatsOpened(ctx, &pb.MarkSeatsOpenedRequest{EventId: eventID.String()})
+	return err
+}
+
 func (c *Client) GetEvent(ctx context.Context, id uuid.UUID) (*pb.Event, error) {
 	resp, err := c.c.GetEvent(ctx, &pb.GetEventRequest{EventId: id.String()})
 	return resp.GetEvent(), err

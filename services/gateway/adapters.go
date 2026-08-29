@@ -39,6 +39,22 @@ func (a CatalogClient) ListOnSale(ctx context.Context, limit int) ([]Event, erro
 	return out, nil
 }
 
+func (a CatalogClient) ListUpcoming(ctx context.Context, limit int) ([]Event, error) {
+	rows, err := a.C.ListUpcoming(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Event, 0, len(rows))
+	for _, e := range rows {
+		ev, err := event(e)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ev)
+	}
+	return out, nil
+}
+
 func (a CatalogClient) GetEvent(ctx context.Context, id uuid.UUID) (*Event, error) {
 	e, err := a.C.GetEvent(ctx, id)
 	if err != nil {

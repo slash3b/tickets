@@ -11,6 +11,15 @@ option go_package = "github.com/slash3b/tickets/gen/tickets/v1;ticketsv1";
 // completely different rates for completely different reasons.
 service CatalogService {
   rpc ListOnSale(ListOnSaleRequest) returns (ListOnSaleResponse);
+
+  // Events that have NOT gone on sale yet. A concert is advertised long before
+  // anyone can buy a seat, and ListOnSale deliberately hides it until then.
+  rpc ListUpcoming(ListUpcomingRequest) returns (ListUpcomingResponse);
+
+  // The on-sale queue: events whose moment has arrived and whose seats inventory
+  // has not been told about. Driven by workers, not by any request path.
+  rpc ListDueForOnSale(ListDueForOnSaleRequest) returns (ListDueForOnSaleResponse);
+  rpc MarkSeatsOpened(MarkSeatsOpenedRequest) returns (MarkSeatsOpenedResponse);
   rpc GetEvent(GetEventRequest) returns (GetEventResponse);
   rpc ListSections(ListSectionsRequest) returns (ListSectionsResponse);
   rpc ListSectionSeats(ListSectionSeatsRequest) returns (ListSectionSeatsResponse);
@@ -54,6 +63,15 @@ message Seat {
 
 message ListOnSaleRequest { int32 limit = 1; }
 message ListOnSaleResponse { repeated Event events = 1; }
+
+message ListUpcomingRequest { int32 limit = 1; }
+message ListUpcomingResponse { repeated Event events = 1; }
+
+message ListDueForOnSaleRequest { int32 limit = 1; }
+message ListDueForOnSaleResponse { repeated Event events = 1; }
+
+message MarkSeatsOpenedRequest { string event_id = 1; }
+message MarkSeatsOpenedResponse {}
 
 message GetEventRequest { string event_id = 1; }
 message GetEventResponse { Event event = 1; }

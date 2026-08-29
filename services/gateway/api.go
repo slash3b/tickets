@@ -24,6 +24,7 @@ import (
 // calls in one binary; behind gRPC later, none of this changes.
 type Catalog interface {
 	ListOnSale(ctx context.Context, limit int) ([]Event, error)
+	ListUpcoming(ctx context.Context, limit int) ([]Event, error)
 	GetEvent(ctx context.Context, id uuid.UUID) (*Event, error)
 	Sections(ctx context.Context, eventID uuid.UUID) ([]Section, error)
 	SectionSeats(ctx context.Context, sectionID uuid.UUID) ([]Seat, error)
@@ -87,6 +88,10 @@ func (a *API) Handler() http.Handler {
 	// PATTERN, so "GET /api/events/{id}" stays one span name instead of one per
 	// event id. See pkg/obs/http.go for why that is done per route.
 	obs.Route(mux, a.lg, "GET /api/events", a.listEvents)
+	// BEFORE /api/events/{id}, because net/http's mux matches the more specific
+	// pattern first — but only if it can tell them apart, and "upcoming" would
+	// otherwise be a perfectly good {id} that fails to parse as a uuid.
+	obs.Route(mux, a.lg, "GET /api/events/upcoming", a.listUpcoming)
 	obs.Route(mux, a.lg, "GET /api/events/{id}", a.getEvent)
 	obs.Route(mux, a.lg, "GET /api/events/{id}/sections", a.listSections)
 	obs.Route(mux, a.lg, "GET /api/events/{id}/sections/{sid}", a.sectionSeats)
@@ -101,6 +106,20 @@ func (a *API) listEvents(w http.ResponseWriter, r *http.Request) {
 	events, err := a.catalog.ListOnSale(r.Context(), 50)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, "could not list events")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"events": events})
+}
+
+// listUpcoming is what lets a concert exist before anybody can buy a seat.
+//
+// The response deliberately carries on_sale_at and nothing about seats: there
+// are no seats yet. Inventory has no rows for this event until its on-sale
+// moment, which is exactly why no endpoint here has to check a clock.
+func (a *API) listUpcoming(w http.ResponseWriter, r *http.Request) {
+	events, err := a.catalog.ListUpcoming(r.Context(), 50)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, "could not list upcoming events")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"events": events})

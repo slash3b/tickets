@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -77,9 +78,18 @@ func (s *Store) AddSection(ctx context.Context, venueID uuid.UUID, name string, 
 
 	// One statement rather than rows*seats round trips — an arena section is
 	// thousands of seats and this is the difference between instant and a minute.
+	//
+	// ROW LABELS PAST Z. The original expression was chr(64 + r), which is right
+	// for a cinema and silently wrong for an arena: row 27 came out as "[" and row
+	// 40 as "h". Spreadsheet-style labelling gives A..Z then AA..AZ, BA.., which is
+	// what a real venue does and what a person can read back off a ticket.
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO catalog.seats (id, section_id, row_label, seat_number, x, y)
-		SELECT gen_random_uuid(), $1, chr(64 + r), c, c * 30.0, r * 30.0
+		SELECT gen_random_uuid(), $1,
+		       CASE WHEN r <= 26 THEN chr(64 + r)
+		            ELSE chr(64 + ((r - 1) / 26)) || chr(65 + ((r - 1) % 26))
+		       END,
+		       c, c * 30.0, r * 30.0
 		  FROM generate_series(1,$2) AS r, generate_series(1,$3) AS c`,
 		sectionID, rows, seatsPerRow); err != nil {
 		return uuid.Nil, fmt.Errorf("generate seats: %w", err)
@@ -116,7 +126,13 @@ func (s *Store) ListOnSale(ctx context.Context, limit int) ([]*Event, error) {
 		return nil, err
 	}
 	defer rows.Close()
+	return scanEvents(rows)
+}
 
+// scanEvents is shared by the three event listings. They differ only in their
+// WHERE clause, and a second copy of this loop would be a place for them to
+// drift apart.
+func scanEvents(rows pgx.Rows) ([]*Event, error) {
 	var out []*Event
 	for rows.Next() {
 		var e Event
@@ -129,6 +145,63 @@ func (s *Store) ListOnSale(ctx context.Context, limit int) ([]*Event, error) {
 }
 
 // FindVenueByName returns a venue id, or uuid.Nil if there is none.
+// ListUpcoming returns events that have NOT gone on sale yet.
+//
+// A concert exists and is advertised long before anyone can buy a seat, and that
+// gap is the entire point of milestone 8. ListOnSale deliberately hides these —
+// they are not buyable — so the frontend needs a separate way to say
+// "on sale Friday at 10".
+func (s *Store) ListUpcoming(ctx context.Context, limit int) ([]*Event, error) {
+	rows, err := s.db.Query(ctx,
+		`SELECT e.id, e.venue_id, e.title, v.name, e.starts_at, e.on_sale_at
+		   FROM catalog.events e JOIN catalog.venues v ON v.id = e.venue_id
+		  WHERE e.on_sale_at > now() AND e.starts_at > now()
+		  ORDER BY e.on_sale_at LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list upcoming: %w", err)
+	}
+	defer rows.Close()
+	return scanEvents(rows)
+}
+
+// ListDueForOnSale returns events whose on-sale moment has arrived and whose
+// seats inventory has not been told about yet.
+//
+// This is the queue for the workers loop that actually starts a sale. It is
+// deliberately a poll rather than a scheduled job: a scheduler that misses its
+// slot leaves a concert unsellable with no way to notice, whereas a poll that
+// misses a tick simply opens the sale a few seconds late.
+func (s *Store) ListDueForOnSale(ctx context.Context, limit int) ([]*Event, error) {
+	rows, err := s.db.Query(ctx,
+		`SELECT e.id, e.venue_id, e.title, v.name, e.starts_at, e.on_sale_at
+		   FROM catalog.events e JOIN catalog.venues v ON v.id = e.venue_id
+		  WHERE e.on_sale_at <= now()
+		    AND e.starts_at > now()
+		    AND e.seats_opened_at IS NULL
+		  ORDER BY e.on_sale_at LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list due for on-sale: %w", err)
+	}
+	defer rows.Close()
+	return scanEvents(rows)
+}
+
+// MarkSeatsOpened records that inventory has opened this event's seats.
+//
+// Written AFTER inventory confirms, never before. If this fails the event stays
+// in the due queue and the next tick opens it again — which is safe because
+// OpenEvent is idempotent, and is the right way round: opening twice costs
+// nothing, believing an unopened sale is open costs the sale.
+func (s *Store) MarkSeatsOpened(ctx context.Context, eventID uuid.UUID) error {
+	_, err := s.db.Exec(ctx,
+		`UPDATE catalog.events SET seats_opened_at = now()
+		  WHERE id = $1 AND seats_opened_at IS NULL`, eventID)
+	if err != nil {
+		return fmt.Errorf("mark seats opened: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) FindVenueByName(ctx context.Context, name string) (uuid.UUID, error) {
 	var id uuid.UUID
 	err := s.db.QueryRow(ctx, `SELECT id FROM catalog.venues WHERE name = $1 LIMIT 1`, name).Scan(&id)

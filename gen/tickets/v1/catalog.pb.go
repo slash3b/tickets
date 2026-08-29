@@ -333,6 +333,262 @@ func (x *ListOnSaleResponse) GetEvents() []*Event {
 	return nil
 }
 
+type ListUpcomingRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Limit         int32                  `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListUpcomingRequest) Reset() {
+	*x = ListUpcomingRequest{}
+	mi := &file_tickets_v1_catalog_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListUpcomingRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListUpcomingRequest) ProtoMessage() {}
+
+func (x *ListUpcomingRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_tickets_v1_catalog_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListUpcomingRequest.ProtoReflect.Descriptor instead.
+func (*ListUpcomingRequest) Descriptor() ([]byte, []int) {
+	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *ListUpcomingRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type ListUpcomingResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Events        []*Event               `protobuf:"bytes,1,rep,name=events,proto3" json:"events,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListUpcomingResponse) Reset() {
+	*x = ListUpcomingResponse{}
+	mi := &file_tickets_v1_catalog_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListUpcomingResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListUpcomingResponse) ProtoMessage() {}
+
+func (x *ListUpcomingResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_tickets_v1_catalog_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListUpcomingResponse.ProtoReflect.Descriptor instead.
+func (*ListUpcomingResponse) Descriptor() ([]byte, []int) {
+	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *ListUpcomingResponse) GetEvents() []*Event {
+	if x != nil {
+		return x.Events
+	}
+	return nil
+}
+
+type ListDueForOnSaleRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Limit         int32                  `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListDueForOnSaleRequest) Reset() {
+	*x = ListDueForOnSaleRequest{}
+	mi := &file_tickets_v1_catalog_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListDueForOnSaleRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListDueForOnSaleRequest) ProtoMessage() {}
+
+func (x *ListDueForOnSaleRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_tickets_v1_catalog_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListDueForOnSaleRequest.ProtoReflect.Descriptor instead.
+func (*ListDueForOnSaleRequest) Descriptor() ([]byte, []int) {
+	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *ListDueForOnSaleRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type ListDueForOnSaleResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Events        []*Event               `protobuf:"bytes,1,rep,name=events,proto3" json:"events,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListDueForOnSaleResponse) Reset() {
+	*x = ListDueForOnSaleResponse{}
+	mi := &file_tickets_v1_catalog_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListDueForOnSaleResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListDueForOnSaleResponse) ProtoMessage() {}
+
+func (x *ListDueForOnSaleResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_tickets_v1_catalog_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListDueForOnSaleResponse.ProtoReflect.Descriptor instead.
+func (*ListDueForOnSaleResponse) Descriptor() ([]byte, []int) {
+	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *ListDueForOnSaleResponse) GetEvents() []*Event {
+	if x != nil {
+		return x.Events
+	}
+	return nil
+}
+
+type MarkSeatsOpenedRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	EventId       string                 `protobuf:"bytes,1,opt,name=event_id,json=eventId,proto3" json:"event_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MarkSeatsOpenedRequest) Reset() {
+	*x = MarkSeatsOpenedRequest{}
+	mi := &file_tickets_v1_catalog_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MarkSeatsOpenedRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MarkSeatsOpenedRequest) ProtoMessage() {}
+
+func (x *MarkSeatsOpenedRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_tickets_v1_catalog_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MarkSeatsOpenedRequest.ProtoReflect.Descriptor instead.
+func (*MarkSeatsOpenedRequest) Descriptor() ([]byte, []int) {
+	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *MarkSeatsOpenedRequest) GetEventId() string {
+	if x != nil {
+		return x.EventId
+	}
+	return ""
+}
+
+type MarkSeatsOpenedResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MarkSeatsOpenedResponse) Reset() {
+	*x = MarkSeatsOpenedResponse{}
+	mi := &file_tickets_v1_catalog_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MarkSeatsOpenedResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MarkSeatsOpenedResponse) ProtoMessage() {}
+
+func (x *MarkSeatsOpenedResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_tickets_v1_catalog_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MarkSeatsOpenedResponse.ProtoReflect.Descriptor instead.
+func (*MarkSeatsOpenedResponse) Descriptor() ([]byte, []int) {
+	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{10}
+}
+
 type GetEventRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	EventId       string                 `protobuf:"bytes,1,opt,name=event_id,json=eventId,proto3" json:"event_id,omitempty"`
@@ -342,7 +598,7 @@ type GetEventRequest struct {
 
 func (x *GetEventRequest) Reset() {
 	*x = GetEventRequest{}
-	mi := &file_tickets_v1_catalog_proto_msgTypes[5]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -354,7 +610,7 @@ func (x *GetEventRequest) String() string {
 func (*GetEventRequest) ProtoMessage() {}
 
 func (x *GetEventRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tickets_v1_catalog_proto_msgTypes[5]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -367,7 +623,7 @@ func (x *GetEventRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetEventRequest.ProtoReflect.Descriptor instead.
 func (*GetEventRequest) Descriptor() ([]byte, []int) {
-	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{5}
+	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *GetEventRequest) GetEventId() string {
@@ -386,7 +642,7 @@ type GetEventResponse struct {
 
 func (x *GetEventResponse) Reset() {
 	*x = GetEventResponse{}
-	mi := &file_tickets_v1_catalog_proto_msgTypes[6]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -398,7 +654,7 @@ func (x *GetEventResponse) String() string {
 func (*GetEventResponse) ProtoMessage() {}
 
 func (x *GetEventResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tickets_v1_catalog_proto_msgTypes[6]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -411,7 +667,7 @@ func (x *GetEventResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetEventResponse.ProtoReflect.Descriptor instead.
 func (*GetEventResponse) Descriptor() ([]byte, []int) {
-	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{6}
+	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *GetEventResponse) GetEvent() *Event {
@@ -430,7 +686,7 @@ type ListSectionsRequest struct {
 
 func (x *ListSectionsRequest) Reset() {
 	*x = ListSectionsRequest{}
-	mi := &file_tickets_v1_catalog_proto_msgTypes[7]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -442,7 +698,7 @@ func (x *ListSectionsRequest) String() string {
 func (*ListSectionsRequest) ProtoMessage() {}
 
 func (x *ListSectionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tickets_v1_catalog_proto_msgTypes[7]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -455,7 +711,7 @@ func (x *ListSectionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSectionsRequest.ProtoReflect.Descriptor instead.
 func (*ListSectionsRequest) Descriptor() ([]byte, []int) {
-	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{7}
+	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ListSectionsRequest) GetEventId() string {
@@ -474,7 +730,7 @@ type ListSectionsResponse struct {
 
 func (x *ListSectionsResponse) Reset() {
 	*x = ListSectionsResponse{}
-	mi := &file_tickets_v1_catalog_proto_msgTypes[8]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -486,7 +742,7 @@ func (x *ListSectionsResponse) String() string {
 func (*ListSectionsResponse) ProtoMessage() {}
 
 func (x *ListSectionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tickets_v1_catalog_proto_msgTypes[8]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -499,7 +755,7 @@ func (x *ListSectionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSectionsResponse.ProtoReflect.Descriptor instead.
 func (*ListSectionsResponse) Descriptor() ([]byte, []int) {
-	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{8}
+	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ListSectionsResponse) GetSections() []*Section {
@@ -518,7 +774,7 @@ type ListSectionSeatsRequest struct {
 
 func (x *ListSectionSeatsRequest) Reset() {
 	*x = ListSectionSeatsRequest{}
-	mi := &file_tickets_v1_catalog_proto_msgTypes[9]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -530,7 +786,7 @@ func (x *ListSectionSeatsRequest) String() string {
 func (*ListSectionSeatsRequest) ProtoMessage() {}
 
 func (x *ListSectionSeatsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tickets_v1_catalog_proto_msgTypes[9]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -543,7 +799,7 @@ func (x *ListSectionSeatsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSectionSeatsRequest.ProtoReflect.Descriptor instead.
 func (*ListSectionSeatsRequest) Descriptor() ([]byte, []int) {
-	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{9}
+	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ListSectionSeatsRequest) GetSectionId() string {
@@ -562,7 +818,7 @@ type ListSectionSeatsResponse struct {
 
 func (x *ListSectionSeatsResponse) Reset() {
 	*x = ListSectionSeatsResponse{}
-	mi := &file_tickets_v1_catalog_proto_msgTypes[10]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -574,7 +830,7 @@ func (x *ListSectionSeatsResponse) String() string {
 func (*ListSectionSeatsResponse) ProtoMessage() {}
 
 func (x *ListSectionSeatsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tickets_v1_catalog_proto_msgTypes[10]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -587,7 +843,7 @@ func (x *ListSectionSeatsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSectionSeatsResponse.ProtoReflect.Descriptor instead.
 func (*ListSectionSeatsResponse) Descriptor() ([]byte, []int) {
-	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{10}
+	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ListSectionSeatsResponse) GetSeats() []*Seat {
@@ -606,7 +862,7 @@ type ListEventSeatIdsRequest struct {
 
 func (x *ListEventSeatIdsRequest) Reset() {
 	*x = ListEventSeatIdsRequest{}
-	mi := &file_tickets_v1_catalog_proto_msgTypes[11]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -618,7 +874,7 @@ func (x *ListEventSeatIdsRequest) String() string {
 func (*ListEventSeatIdsRequest) ProtoMessage() {}
 
 func (x *ListEventSeatIdsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tickets_v1_catalog_proto_msgTypes[11]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -631,7 +887,7 @@ func (x *ListEventSeatIdsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListEventSeatIdsRequest.ProtoReflect.Descriptor instead.
 func (*ListEventSeatIdsRequest) Descriptor() ([]byte, []int) {
-	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{11}
+	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ListEventSeatIdsRequest) GetEventId() string {
@@ -650,7 +906,7 @@ type ListEventSeatIdsResponse struct {
 
 func (x *ListEventSeatIdsResponse) Reset() {
 	*x = ListEventSeatIdsResponse{}
-	mi := &file_tickets_v1_catalog_proto_msgTypes[12]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -662,7 +918,7 @@ func (x *ListEventSeatIdsResponse) String() string {
 func (*ListEventSeatIdsResponse) ProtoMessage() {}
 
 func (x *ListEventSeatIdsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tickets_v1_catalog_proto_msgTypes[12]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -675,7 +931,7 @@ func (x *ListEventSeatIdsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListEventSeatIdsResponse.ProtoReflect.Descriptor instead.
 func (*ListEventSeatIdsResponse) Descriptor() ([]byte, []int) {
-	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{12}
+	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ListEventSeatIdsResponse) GetSeatIds() []string {
@@ -697,7 +953,7 @@ type CreateEventRequest struct {
 
 func (x *CreateEventRequest) Reset() {
 	*x = CreateEventRequest{}
-	mi := &file_tickets_v1_catalog_proto_msgTypes[13]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -709,7 +965,7 @@ func (x *CreateEventRequest) String() string {
 func (*CreateEventRequest) ProtoMessage() {}
 
 func (x *CreateEventRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tickets_v1_catalog_proto_msgTypes[13]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -722,7 +978,7 @@ func (x *CreateEventRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateEventRequest.ProtoReflect.Descriptor instead.
 func (*CreateEventRequest) Descriptor() ([]byte, []int) {
-	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{13}
+	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *CreateEventRequest) GetVenueId() string {
@@ -762,7 +1018,7 @@ type CreateEventResponse struct {
 
 func (x *CreateEventResponse) Reset() {
 	*x = CreateEventResponse{}
-	mi := &file_tickets_v1_catalog_proto_msgTypes[14]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -774,7 +1030,7 @@ func (x *CreateEventResponse) String() string {
 func (*CreateEventResponse) ProtoMessage() {}
 
 func (x *CreateEventResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tickets_v1_catalog_proto_msgTypes[14]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -787,7 +1043,7 @@ func (x *CreateEventResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateEventResponse.ProtoReflect.Descriptor instead.
 func (*CreateEventResponse) Descriptor() ([]byte, []int) {
-	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{14}
+	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *CreateEventResponse) GetEvent() *Event {
@@ -808,7 +1064,7 @@ type SetPriceRequest struct {
 
 func (x *SetPriceRequest) Reset() {
 	*x = SetPriceRequest{}
-	mi := &file_tickets_v1_catalog_proto_msgTypes[15]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -820,7 +1076,7 @@ func (x *SetPriceRequest) String() string {
 func (*SetPriceRequest) ProtoMessage() {}
 
 func (x *SetPriceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tickets_v1_catalog_proto_msgTypes[15]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -833,7 +1089,7 @@ func (x *SetPriceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetPriceRequest.ProtoReflect.Descriptor instead.
 func (*SetPriceRequest) Descriptor() ([]byte, []int) {
-	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{15}
+	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *SetPriceRequest) GetEventId() string {
@@ -865,7 +1121,7 @@ type SetPriceResponse struct {
 
 func (x *SetPriceResponse) Reset() {
 	*x = SetPriceResponse{}
-	mi := &file_tickets_v1_catalog_proto_msgTypes[16]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -877,7 +1133,7 @@ func (x *SetPriceResponse) String() string {
 func (*SetPriceResponse) ProtoMessage() {}
 
 func (x *SetPriceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tickets_v1_catalog_proto_msgTypes[16]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -890,7 +1146,7 @@ func (x *SetPriceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetPriceResponse.ProtoReflect.Descriptor instead.
 func (*SetPriceResponse) Descriptor() ([]byte, []int) {
-	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{16}
+	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{22}
 }
 
 type CountEventsStartingOnRequest struct {
@@ -902,7 +1158,7 @@ type CountEventsStartingOnRequest struct {
 
 func (x *CountEventsStartingOnRequest) Reset() {
 	*x = CountEventsStartingOnRequest{}
-	mi := &file_tickets_v1_catalog_proto_msgTypes[17]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -914,7 +1170,7 @@ func (x *CountEventsStartingOnRequest) String() string {
 func (*CountEventsStartingOnRequest) ProtoMessage() {}
 
 func (x *CountEventsStartingOnRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tickets_v1_catalog_proto_msgTypes[17]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -927,7 +1183,7 @@ func (x *CountEventsStartingOnRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CountEventsStartingOnRequest.ProtoReflect.Descriptor instead.
 func (*CountEventsStartingOnRequest) Descriptor() ([]byte, []int) {
-	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{17}
+	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *CountEventsStartingOnRequest) GetDay() *timestamppb.Timestamp {
@@ -946,7 +1202,7 @@ type CountEventsStartingOnResponse struct {
 
 func (x *CountEventsStartingOnResponse) Reset() {
 	*x = CountEventsStartingOnResponse{}
-	mi := &file_tickets_v1_catalog_proto_msgTypes[18]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -958,7 +1214,7 @@ func (x *CountEventsStartingOnResponse) String() string {
 func (*CountEventsStartingOnResponse) ProtoMessage() {}
 
 func (x *CountEventsStartingOnResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tickets_v1_catalog_proto_msgTypes[18]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -971,7 +1227,7 @@ func (x *CountEventsStartingOnResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CountEventsStartingOnResponse.ProtoReflect.Descriptor instead.
 func (*CountEventsStartingOnResponse) Descriptor() ([]byte, []int) {
-	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{18}
+	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *CountEventsStartingOnResponse) GetCount() int32 {
@@ -990,7 +1246,7 @@ type FindVenueByNameRequest struct {
 
 func (x *FindVenueByNameRequest) Reset() {
 	*x = FindVenueByNameRequest{}
-	mi := &file_tickets_v1_catalog_proto_msgTypes[19]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1002,7 +1258,7 @@ func (x *FindVenueByNameRequest) String() string {
 func (*FindVenueByNameRequest) ProtoMessage() {}
 
 func (x *FindVenueByNameRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tickets_v1_catalog_proto_msgTypes[19]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1015,7 +1271,7 @@ func (x *FindVenueByNameRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FindVenueByNameRequest.ProtoReflect.Descriptor instead.
 func (*FindVenueByNameRequest) Descriptor() ([]byte, []int) {
-	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{19}
+	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *FindVenueByNameRequest) GetName() string {
@@ -1034,7 +1290,7 @@ type FindVenueByNameResponse struct {
 
 func (x *FindVenueByNameResponse) Reset() {
 	*x = FindVenueByNameResponse{}
-	mi := &file_tickets_v1_catalog_proto_msgTypes[20]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1046,7 +1302,7 @@ func (x *FindVenueByNameResponse) String() string {
 func (*FindVenueByNameResponse) ProtoMessage() {}
 
 func (x *FindVenueByNameResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tickets_v1_catalog_proto_msgTypes[20]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1059,7 +1315,7 @@ func (x *FindVenueByNameResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FindVenueByNameResponse.ProtoReflect.Descriptor instead.
 func (*FindVenueByNameResponse) Descriptor() ([]byte, []int) {
-	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{20}
+	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *FindVenueByNameResponse) GetVenueId() string {
@@ -1078,7 +1334,7 @@ type FirstSectionRequest struct {
 
 func (x *FirstSectionRequest) Reset() {
 	*x = FirstSectionRequest{}
-	mi := &file_tickets_v1_catalog_proto_msgTypes[21]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1090,7 +1346,7 @@ func (x *FirstSectionRequest) String() string {
 func (*FirstSectionRequest) ProtoMessage() {}
 
 func (x *FirstSectionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tickets_v1_catalog_proto_msgTypes[21]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1103,7 +1359,7 @@ func (x *FirstSectionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FirstSectionRequest.ProtoReflect.Descriptor instead.
 func (*FirstSectionRequest) Descriptor() ([]byte, []int) {
-	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{21}
+	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *FirstSectionRequest) GetVenueId() string {
@@ -1122,7 +1378,7 @@ type FirstSectionResponse struct {
 
 func (x *FirstSectionResponse) Reset() {
 	*x = FirstSectionResponse{}
-	mi := &file_tickets_v1_catalog_proto_msgTypes[22]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1134,7 +1390,7 @@ func (x *FirstSectionResponse) String() string {
 func (*FirstSectionResponse) ProtoMessage() {}
 
 func (x *FirstSectionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tickets_v1_catalog_proto_msgTypes[22]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1147,7 +1403,7 @@ func (x *FirstSectionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FirstSectionResponse.ProtoReflect.Descriptor instead.
 func (*FirstSectionResponse) Descriptor() ([]byte, []int) {
-	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{22}
+	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *FirstSectionResponse) GetSectionId() string {
@@ -1167,7 +1423,7 @@ type CreateVenueRequest struct {
 
 func (x *CreateVenueRequest) Reset() {
 	*x = CreateVenueRequest{}
-	mi := &file_tickets_v1_catalog_proto_msgTypes[23]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1179,7 +1435,7 @@ func (x *CreateVenueRequest) String() string {
 func (*CreateVenueRequest) ProtoMessage() {}
 
 func (x *CreateVenueRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tickets_v1_catalog_proto_msgTypes[23]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1192,7 +1448,7 @@ func (x *CreateVenueRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateVenueRequest.ProtoReflect.Descriptor instead.
 func (*CreateVenueRequest) Descriptor() ([]byte, []int) {
-	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{23}
+	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *CreateVenueRequest) GetName() string {
@@ -1218,7 +1474,7 @@ type CreateVenueResponse struct {
 
 func (x *CreateVenueResponse) Reset() {
 	*x = CreateVenueResponse{}
-	mi := &file_tickets_v1_catalog_proto_msgTypes[24]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1230,7 +1486,7 @@ func (x *CreateVenueResponse) String() string {
 func (*CreateVenueResponse) ProtoMessage() {}
 
 func (x *CreateVenueResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tickets_v1_catalog_proto_msgTypes[24]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1243,7 +1499,7 @@ func (x *CreateVenueResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateVenueResponse.ProtoReflect.Descriptor instead.
 func (*CreateVenueResponse) Descriptor() ([]byte, []int) {
-	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{24}
+	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *CreateVenueResponse) GetVenueId() string {
@@ -1265,7 +1521,7 @@ type AddSectionRequest struct {
 
 func (x *AddSectionRequest) Reset() {
 	*x = AddSectionRequest{}
-	mi := &file_tickets_v1_catalog_proto_msgTypes[25]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1277,7 +1533,7 @@ func (x *AddSectionRequest) String() string {
 func (*AddSectionRequest) ProtoMessage() {}
 
 func (x *AddSectionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tickets_v1_catalog_proto_msgTypes[25]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1290,7 +1546,7 @@ func (x *AddSectionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddSectionRequest.ProtoReflect.Descriptor instead.
 func (*AddSectionRequest) Descriptor() ([]byte, []int) {
-	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{25}
+	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *AddSectionRequest) GetVenueId() string {
@@ -1330,7 +1586,7 @@ type AddSectionResponse struct {
 
 func (x *AddSectionResponse) Reset() {
 	*x = AddSectionResponse{}
-	mi := &file_tickets_v1_catalog_proto_msgTypes[26]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1342,7 +1598,7 @@ func (x *AddSectionResponse) String() string {
 func (*AddSectionResponse) ProtoMessage() {}
 
 func (x *AddSectionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tickets_v1_catalog_proto_msgTypes[26]
+	mi := &file_tickets_v1_catalog_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1355,7 +1611,7 @@ func (x *AddSectionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddSectionResponse.ProtoReflect.Descriptor instead.
 func (*AddSectionResponse) Descriptor() ([]byte, []int) {
-	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{26}
+	return file_tickets_v1_catalog_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *AddSectionResponse) GetSectionId() string {
@@ -1392,7 +1648,18 @@ const file_tickets_v1_catalog_proto_rawDesc = "" +
 	"\x11ListOnSaleRequest\x12\x14\n" +
 	"\x05limit\x18\x01 \x01(\x05R\x05limit\"?\n" +
 	"\x12ListOnSaleResponse\x12)\n" +
-	"\x06events\x18\x01 \x03(\v2\x11.tickets.v1.EventR\x06events\",\n" +
+	"\x06events\x18\x01 \x03(\v2\x11.tickets.v1.EventR\x06events\"+\n" +
+	"\x13ListUpcomingRequest\x12\x14\n" +
+	"\x05limit\x18\x01 \x01(\x05R\x05limit\"A\n" +
+	"\x14ListUpcomingResponse\x12)\n" +
+	"\x06events\x18\x01 \x03(\v2\x11.tickets.v1.EventR\x06events\"/\n" +
+	"\x17ListDueForOnSaleRequest\x12\x14\n" +
+	"\x05limit\x18\x01 \x01(\x05R\x05limit\"E\n" +
+	"\x18ListDueForOnSaleResponse\x12)\n" +
+	"\x06events\x18\x01 \x03(\v2\x11.tickets.v1.EventR\x06events\"3\n" +
+	"\x16MarkSeatsOpenedRequest\x12\x19\n" +
+	"\bevent_id\x18\x01 \x01(\tR\aeventId\"\x19\n" +
+	"\x17MarkSeatsOpenedResponse\",\n" +
 	"\x0fGetEventRequest\x12\x19\n" +
 	"\bevent_id\x18\x01 \x01(\tR\aeventId\";\n" +
 	"\x10GetEventResponse\x12'\n" +
@@ -1450,10 +1717,14 @@ const file_tickets_v1_catalog_proto_rawDesc = "" +
 	"\rseats_per_row\x18\x04 \x01(\x05R\vseatsPerRow\"3\n" +
 	"\x12AddSectionResponse\x12\x1d\n" +
 	"\n" +
-	"section_id\x18\x01 \x01(\tR\tsectionId2\x86\b\n" +
+	"section_id\x18\x01 \x01(\tR\tsectionId2\x94\n" +
+	"\n" +
 	"\x0eCatalogService\x12K\n" +
 	"\n" +
-	"ListOnSale\x12\x1d.tickets.v1.ListOnSaleRequest\x1a\x1e.tickets.v1.ListOnSaleResponse\x12E\n" +
+	"ListOnSale\x12\x1d.tickets.v1.ListOnSaleRequest\x1a\x1e.tickets.v1.ListOnSaleResponse\x12Q\n" +
+	"\fListUpcoming\x12\x1f.tickets.v1.ListUpcomingRequest\x1a .tickets.v1.ListUpcomingResponse\x12]\n" +
+	"\x10ListDueForOnSale\x12#.tickets.v1.ListDueForOnSaleRequest\x1a$.tickets.v1.ListDueForOnSaleResponse\x12Z\n" +
+	"\x0fMarkSeatsOpened\x12\".tickets.v1.MarkSeatsOpenedRequest\x1a#.tickets.v1.MarkSeatsOpenedResponse\x12E\n" +
 	"\bGetEvent\x12\x1b.tickets.v1.GetEventRequest\x1a\x1c.tickets.v1.GetEventResponse\x12Q\n" +
 	"\fListSections\x12\x1f.tickets.v1.ListSectionsRequest\x1a .tickets.v1.ListSectionsResponse\x12]\n" +
 	"\x10ListSectionSeats\x12#.tickets.v1.ListSectionSeatsRequest\x1a$.tickets.v1.ListSectionSeatsResponse\x12]\n" +
@@ -1482,77 +1753,91 @@ func file_tickets_v1_catalog_proto_rawDescGZIP() []byte {
 	return file_tickets_v1_catalog_proto_rawDescData
 }
 
-var file_tickets_v1_catalog_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
+var file_tickets_v1_catalog_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
 var file_tickets_v1_catalog_proto_goTypes = []any{
 	(*Event)(nil),                         // 0: tickets.v1.Event
 	(*Section)(nil),                       // 1: tickets.v1.Section
 	(*Seat)(nil),                          // 2: tickets.v1.Seat
 	(*ListOnSaleRequest)(nil),             // 3: tickets.v1.ListOnSaleRequest
 	(*ListOnSaleResponse)(nil),            // 4: tickets.v1.ListOnSaleResponse
-	(*GetEventRequest)(nil),               // 5: tickets.v1.GetEventRequest
-	(*GetEventResponse)(nil),              // 6: tickets.v1.GetEventResponse
-	(*ListSectionsRequest)(nil),           // 7: tickets.v1.ListSectionsRequest
-	(*ListSectionsResponse)(nil),          // 8: tickets.v1.ListSectionsResponse
-	(*ListSectionSeatsRequest)(nil),       // 9: tickets.v1.ListSectionSeatsRequest
-	(*ListSectionSeatsResponse)(nil),      // 10: tickets.v1.ListSectionSeatsResponse
-	(*ListEventSeatIdsRequest)(nil),       // 11: tickets.v1.ListEventSeatIdsRequest
-	(*ListEventSeatIdsResponse)(nil),      // 12: tickets.v1.ListEventSeatIdsResponse
-	(*CreateEventRequest)(nil),            // 13: tickets.v1.CreateEventRequest
-	(*CreateEventResponse)(nil),           // 14: tickets.v1.CreateEventResponse
-	(*SetPriceRequest)(nil),               // 15: tickets.v1.SetPriceRequest
-	(*SetPriceResponse)(nil),              // 16: tickets.v1.SetPriceResponse
-	(*CountEventsStartingOnRequest)(nil),  // 17: tickets.v1.CountEventsStartingOnRequest
-	(*CountEventsStartingOnResponse)(nil), // 18: tickets.v1.CountEventsStartingOnResponse
-	(*FindVenueByNameRequest)(nil),        // 19: tickets.v1.FindVenueByNameRequest
-	(*FindVenueByNameResponse)(nil),       // 20: tickets.v1.FindVenueByNameResponse
-	(*FirstSectionRequest)(nil),           // 21: tickets.v1.FirstSectionRequest
-	(*FirstSectionResponse)(nil),          // 22: tickets.v1.FirstSectionResponse
-	(*CreateVenueRequest)(nil),            // 23: tickets.v1.CreateVenueRequest
-	(*CreateVenueResponse)(nil),           // 24: tickets.v1.CreateVenueResponse
-	(*AddSectionRequest)(nil),             // 25: tickets.v1.AddSectionRequest
-	(*AddSectionResponse)(nil),            // 26: tickets.v1.AddSectionResponse
-	(*timestamppb.Timestamp)(nil),         // 27: google.protobuf.Timestamp
+	(*ListUpcomingRequest)(nil),           // 5: tickets.v1.ListUpcomingRequest
+	(*ListUpcomingResponse)(nil),          // 6: tickets.v1.ListUpcomingResponse
+	(*ListDueForOnSaleRequest)(nil),       // 7: tickets.v1.ListDueForOnSaleRequest
+	(*ListDueForOnSaleResponse)(nil),      // 8: tickets.v1.ListDueForOnSaleResponse
+	(*MarkSeatsOpenedRequest)(nil),        // 9: tickets.v1.MarkSeatsOpenedRequest
+	(*MarkSeatsOpenedResponse)(nil),       // 10: tickets.v1.MarkSeatsOpenedResponse
+	(*GetEventRequest)(nil),               // 11: tickets.v1.GetEventRequest
+	(*GetEventResponse)(nil),              // 12: tickets.v1.GetEventResponse
+	(*ListSectionsRequest)(nil),           // 13: tickets.v1.ListSectionsRequest
+	(*ListSectionsResponse)(nil),          // 14: tickets.v1.ListSectionsResponse
+	(*ListSectionSeatsRequest)(nil),       // 15: tickets.v1.ListSectionSeatsRequest
+	(*ListSectionSeatsResponse)(nil),      // 16: tickets.v1.ListSectionSeatsResponse
+	(*ListEventSeatIdsRequest)(nil),       // 17: tickets.v1.ListEventSeatIdsRequest
+	(*ListEventSeatIdsResponse)(nil),      // 18: tickets.v1.ListEventSeatIdsResponse
+	(*CreateEventRequest)(nil),            // 19: tickets.v1.CreateEventRequest
+	(*CreateEventResponse)(nil),           // 20: tickets.v1.CreateEventResponse
+	(*SetPriceRequest)(nil),               // 21: tickets.v1.SetPriceRequest
+	(*SetPriceResponse)(nil),              // 22: tickets.v1.SetPriceResponse
+	(*CountEventsStartingOnRequest)(nil),  // 23: tickets.v1.CountEventsStartingOnRequest
+	(*CountEventsStartingOnResponse)(nil), // 24: tickets.v1.CountEventsStartingOnResponse
+	(*FindVenueByNameRequest)(nil),        // 25: tickets.v1.FindVenueByNameRequest
+	(*FindVenueByNameResponse)(nil),       // 26: tickets.v1.FindVenueByNameResponse
+	(*FirstSectionRequest)(nil),           // 27: tickets.v1.FirstSectionRequest
+	(*FirstSectionResponse)(nil),          // 28: tickets.v1.FirstSectionResponse
+	(*CreateVenueRequest)(nil),            // 29: tickets.v1.CreateVenueRequest
+	(*CreateVenueResponse)(nil),           // 30: tickets.v1.CreateVenueResponse
+	(*AddSectionRequest)(nil),             // 31: tickets.v1.AddSectionRequest
+	(*AddSectionResponse)(nil),            // 32: tickets.v1.AddSectionResponse
+	(*timestamppb.Timestamp)(nil),         // 33: google.protobuf.Timestamp
 }
 var file_tickets_v1_catalog_proto_depIdxs = []int32{
-	27, // 0: tickets.v1.Event.starts_at:type_name -> google.protobuf.Timestamp
-	27, // 1: tickets.v1.Event.on_sale_at:type_name -> google.protobuf.Timestamp
+	33, // 0: tickets.v1.Event.starts_at:type_name -> google.protobuf.Timestamp
+	33, // 1: tickets.v1.Event.on_sale_at:type_name -> google.protobuf.Timestamp
 	0,  // 2: tickets.v1.ListOnSaleResponse.events:type_name -> tickets.v1.Event
-	0,  // 3: tickets.v1.GetEventResponse.event:type_name -> tickets.v1.Event
-	1,  // 4: tickets.v1.ListSectionsResponse.sections:type_name -> tickets.v1.Section
-	2,  // 5: tickets.v1.ListSectionSeatsResponse.seats:type_name -> tickets.v1.Seat
-	27, // 6: tickets.v1.CreateEventRequest.starts_at:type_name -> google.protobuf.Timestamp
-	27, // 7: tickets.v1.CreateEventRequest.on_sale_at:type_name -> google.protobuf.Timestamp
-	0,  // 8: tickets.v1.CreateEventResponse.event:type_name -> tickets.v1.Event
-	27, // 9: tickets.v1.CountEventsStartingOnRequest.day:type_name -> google.protobuf.Timestamp
-	3,  // 10: tickets.v1.CatalogService.ListOnSale:input_type -> tickets.v1.ListOnSaleRequest
-	5,  // 11: tickets.v1.CatalogService.GetEvent:input_type -> tickets.v1.GetEventRequest
-	7,  // 12: tickets.v1.CatalogService.ListSections:input_type -> tickets.v1.ListSectionsRequest
-	9,  // 13: tickets.v1.CatalogService.ListSectionSeats:input_type -> tickets.v1.ListSectionSeatsRequest
-	11, // 14: tickets.v1.CatalogService.ListEventSeatIds:input_type -> tickets.v1.ListEventSeatIdsRequest
-	13, // 15: tickets.v1.CatalogService.CreateEvent:input_type -> tickets.v1.CreateEventRequest
-	15, // 16: tickets.v1.CatalogService.SetPrice:input_type -> tickets.v1.SetPriceRequest
-	17, // 17: tickets.v1.CatalogService.CountEventsStartingOn:input_type -> tickets.v1.CountEventsStartingOnRequest
-	19, // 18: tickets.v1.CatalogService.FindVenueByName:input_type -> tickets.v1.FindVenueByNameRequest
-	21, // 19: tickets.v1.CatalogService.FirstSection:input_type -> tickets.v1.FirstSectionRequest
-	23, // 20: tickets.v1.CatalogService.CreateVenue:input_type -> tickets.v1.CreateVenueRequest
-	25, // 21: tickets.v1.CatalogService.AddSection:input_type -> tickets.v1.AddSectionRequest
-	4,  // 22: tickets.v1.CatalogService.ListOnSale:output_type -> tickets.v1.ListOnSaleResponse
-	6,  // 23: tickets.v1.CatalogService.GetEvent:output_type -> tickets.v1.GetEventResponse
-	8,  // 24: tickets.v1.CatalogService.ListSections:output_type -> tickets.v1.ListSectionsResponse
-	10, // 25: tickets.v1.CatalogService.ListSectionSeats:output_type -> tickets.v1.ListSectionSeatsResponse
-	12, // 26: tickets.v1.CatalogService.ListEventSeatIds:output_type -> tickets.v1.ListEventSeatIdsResponse
-	14, // 27: tickets.v1.CatalogService.CreateEvent:output_type -> tickets.v1.CreateEventResponse
-	16, // 28: tickets.v1.CatalogService.SetPrice:output_type -> tickets.v1.SetPriceResponse
-	18, // 29: tickets.v1.CatalogService.CountEventsStartingOn:output_type -> tickets.v1.CountEventsStartingOnResponse
-	20, // 30: tickets.v1.CatalogService.FindVenueByName:output_type -> tickets.v1.FindVenueByNameResponse
-	22, // 31: tickets.v1.CatalogService.FirstSection:output_type -> tickets.v1.FirstSectionResponse
-	24, // 32: tickets.v1.CatalogService.CreateVenue:output_type -> tickets.v1.CreateVenueResponse
-	26, // 33: tickets.v1.CatalogService.AddSection:output_type -> tickets.v1.AddSectionResponse
-	22, // [22:34] is the sub-list for method output_type
-	10, // [10:22] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	0,  // 3: tickets.v1.ListUpcomingResponse.events:type_name -> tickets.v1.Event
+	0,  // 4: tickets.v1.ListDueForOnSaleResponse.events:type_name -> tickets.v1.Event
+	0,  // 5: tickets.v1.GetEventResponse.event:type_name -> tickets.v1.Event
+	1,  // 6: tickets.v1.ListSectionsResponse.sections:type_name -> tickets.v1.Section
+	2,  // 7: tickets.v1.ListSectionSeatsResponse.seats:type_name -> tickets.v1.Seat
+	33, // 8: tickets.v1.CreateEventRequest.starts_at:type_name -> google.protobuf.Timestamp
+	33, // 9: tickets.v1.CreateEventRequest.on_sale_at:type_name -> google.protobuf.Timestamp
+	0,  // 10: tickets.v1.CreateEventResponse.event:type_name -> tickets.v1.Event
+	33, // 11: tickets.v1.CountEventsStartingOnRequest.day:type_name -> google.protobuf.Timestamp
+	3,  // 12: tickets.v1.CatalogService.ListOnSale:input_type -> tickets.v1.ListOnSaleRequest
+	5,  // 13: tickets.v1.CatalogService.ListUpcoming:input_type -> tickets.v1.ListUpcomingRequest
+	7,  // 14: tickets.v1.CatalogService.ListDueForOnSale:input_type -> tickets.v1.ListDueForOnSaleRequest
+	9,  // 15: tickets.v1.CatalogService.MarkSeatsOpened:input_type -> tickets.v1.MarkSeatsOpenedRequest
+	11, // 16: tickets.v1.CatalogService.GetEvent:input_type -> tickets.v1.GetEventRequest
+	13, // 17: tickets.v1.CatalogService.ListSections:input_type -> tickets.v1.ListSectionsRequest
+	15, // 18: tickets.v1.CatalogService.ListSectionSeats:input_type -> tickets.v1.ListSectionSeatsRequest
+	17, // 19: tickets.v1.CatalogService.ListEventSeatIds:input_type -> tickets.v1.ListEventSeatIdsRequest
+	19, // 20: tickets.v1.CatalogService.CreateEvent:input_type -> tickets.v1.CreateEventRequest
+	21, // 21: tickets.v1.CatalogService.SetPrice:input_type -> tickets.v1.SetPriceRequest
+	23, // 22: tickets.v1.CatalogService.CountEventsStartingOn:input_type -> tickets.v1.CountEventsStartingOnRequest
+	25, // 23: tickets.v1.CatalogService.FindVenueByName:input_type -> tickets.v1.FindVenueByNameRequest
+	27, // 24: tickets.v1.CatalogService.FirstSection:input_type -> tickets.v1.FirstSectionRequest
+	29, // 25: tickets.v1.CatalogService.CreateVenue:input_type -> tickets.v1.CreateVenueRequest
+	31, // 26: tickets.v1.CatalogService.AddSection:input_type -> tickets.v1.AddSectionRequest
+	4,  // 27: tickets.v1.CatalogService.ListOnSale:output_type -> tickets.v1.ListOnSaleResponse
+	6,  // 28: tickets.v1.CatalogService.ListUpcoming:output_type -> tickets.v1.ListUpcomingResponse
+	8,  // 29: tickets.v1.CatalogService.ListDueForOnSale:output_type -> tickets.v1.ListDueForOnSaleResponse
+	10, // 30: tickets.v1.CatalogService.MarkSeatsOpened:output_type -> tickets.v1.MarkSeatsOpenedResponse
+	12, // 31: tickets.v1.CatalogService.GetEvent:output_type -> tickets.v1.GetEventResponse
+	14, // 32: tickets.v1.CatalogService.ListSections:output_type -> tickets.v1.ListSectionsResponse
+	16, // 33: tickets.v1.CatalogService.ListSectionSeats:output_type -> tickets.v1.ListSectionSeatsResponse
+	18, // 34: tickets.v1.CatalogService.ListEventSeatIds:output_type -> tickets.v1.ListEventSeatIdsResponse
+	20, // 35: tickets.v1.CatalogService.CreateEvent:output_type -> tickets.v1.CreateEventResponse
+	22, // 36: tickets.v1.CatalogService.SetPrice:output_type -> tickets.v1.SetPriceResponse
+	24, // 37: tickets.v1.CatalogService.CountEventsStartingOn:output_type -> tickets.v1.CountEventsStartingOnResponse
+	26, // 38: tickets.v1.CatalogService.FindVenueByName:output_type -> tickets.v1.FindVenueByNameResponse
+	28, // 39: tickets.v1.CatalogService.FirstSection:output_type -> tickets.v1.FirstSectionResponse
+	30, // 40: tickets.v1.CatalogService.CreateVenue:output_type -> tickets.v1.CreateVenueResponse
+	32, // 41: tickets.v1.CatalogService.AddSection:output_type -> tickets.v1.AddSectionResponse
+	27, // [27:42] is the sub-list for method output_type
+	12, // [12:27] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_tickets_v1_catalog_proto_init() }
@@ -1566,7 +1851,7 @@ func file_tickets_v1_catalog_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tickets_v1_catalog_proto_rawDesc), len(file_tickets_v1_catalog_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   27,
+			NumMessages:   33,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

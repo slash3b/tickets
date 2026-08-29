@@ -41,6 +41,49 @@ func (s *Server) ListOnSale(ctx context.Context, req *pb.ListOnSaleRequest) (*pb
 	return &pb.ListOnSaleResponse{Events: out}, nil
 }
 
+func (s *Server) ListUpcoming(ctx context.Context, req *pb.ListUpcomingRequest) (*pb.ListUpcomingResponse, error) {
+	limit := int(req.GetLimit())
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.store.ListUpcoming(ctx, limit)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "could not list upcoming events")
+	}
+	out := make([]*pb.Event, len(rows))
+	for i, e := range rows {
+		out[i] = wireEvent(e)
+	}
+	return &pb.ListUpcomingResponse{Events: out}, nil
+}
+
+func (s *Server) ListDueForOnSale(ctx context.Context, req *pb.ListDueForOnSaleRequest) (*pb.ListDueForOnSaleResponse, error) {
+	limit := int(req.GetLimit())
+	if limit <= 0 {
+		limit = 10
+	}
+	rows, err := s.store.ListDueForOnSale(ctx, limit)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "could not list due events")
+	}
+	out := make([]*pb.Event, len(rows))
+	for i, e := range rows {
+		out[i] = wireEvent(e)
+	}
+	return &pb.ListDueForOnSaleResponse{Events: out}, nil
+}
+
+func (s *Server) MarkSeatsOpened(ctx context.Context, req *pb.MarkSeatsOpenedRequest) (*pb.MarkSeatsOpenedResponse, error) {
+	id, err := parseUUID(req.GetEventId())
+	if err != nil {
+		return nil, err
+	}
+	if err := s.store.MarkSeatsOpened(ctx, id); err != nil {
+		return nil, status.Error(codes.Internal, "could not mark seats opened")
+	}
+	return &pb.MarkSeatsOpenedResponse{}, nil
+}
+
 func (s *Server) GetEvent(ctx context.Context, req *pb.GetEventRequest) (*pb.GetEventResponse, error) {
 	id, err := parseUUID(req.GetEventId())
 	if err != nil {

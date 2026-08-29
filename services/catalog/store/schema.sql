@@ -45,8 +45,18 @@ CREATE TABLE IF NOT EXISTS catalog.events (
     title      text NOT NULL,
     starts_at  timestamptz NOT NULL,
     on_sale_at timestamptz NOT NULL,
+    -- When inventory was told to open this event's seats.
+    --
+    -- OPENING THE SEATS IS THE ON-SALE. Before it happens there are no rows in
+    -- inventory.event_seats, so a hold fails on its own — no on_sale_at check on
+    -- the hot path, and no window between checking the clock and taking a seat.
+    -- NULL means not yet opened; the workers loop fills it in once.
+    seats_opened_at timestamptz,
     created_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- Idempotent for an existing database: the column was added at milestone 8.
+ALTER TABLE catalog.events ADD COLUMN IF NOT EXISTS seats_opened_at timestamptz;
 
 CREATE INDEX IF NOT EXISTS events_on_sale_idx ON catalog.events (on_sale_at, starts_at);
 
