@@ -681,7 +681,37 @@ OBSERVABILITY - SIGNOZ, INSTALLED 2026-08-24
     tickets.saga.step.duration   by step and outcome
     tickets.payments.reconciled
 
-  VERIFY THEM BY FORCING THE FAILURE, NOT BY READING THE CODE. Two of these were
+  KAFKA METRICS, ADDED 2026-08-30 to feed https://signoz.tickets.lan/messaging-queues/kafka
+  which was empty because nothing produced them. Strimzi has no metricsConfig, so
+  there is no JMX exporter, and no collector was scraping the brokers.
+
+  The kafkametrics receiver lives in deploy/platform/k8s-infra/values.yaml, in the
+  otelDeployment collector - one instance, not the DaemonSet, because these are
+  cluster-wide facts and scraping them per node would multiply every series by the
+  node count. It goes into the chart's `metrics/scraper` pipeline, which the chart
+  declares empty for exactly this and which the presets do not touch.
+
+  Flowing: kafka.brokers, kafka.topic.partitions, kafka.partition.current_offset,
+  kafka.partition.oldest_offset, kafka.partition.replicas,
+  kafka.partition.replicas_in_sync. About 80 series, and stable.
+
+  THE `consumers` SCRAPER IS OFF ON PURPOSE. Consumer lag is meaningless in this
+  system: pkg/events uses a unique group per process (broadcast, not work queue),
+  every reader starts at kafka.LastOffset so a healthy consumer's lag is ~0 by
+  construction, and every pod restart abandons a group whose lag then grows
+  forever, measuring how long ago that pod died. Measured before switching it off:
+  29 groups, 72 lag series, from one day of rolling deploys. SigNoz's Consumer Lag
+  panel is therefore empty; the partition and topic panels are the ones that
+  answer the hot-partition question and they work.
+
+  MESSAGING SPANS, SAME DATE. Publishes and consumes now emit producer and
+  consumer spans with the messaging semantic conventions, and W3C trace context
+  rides in Kafka headers, so a trace crosses the broker instead of ending at the
+  publish. Verified: one trace contains simulator -> gateway -> inventory ->
+  `inventory.seat.held publish` -> `gateway:inventory.seat.held process`, with the
+  saga and the bank in the same trace.
+
+    VERIFY THEM BY FORCING THE FAILURE, NOT BY READING THE CODE. Two of these were
   wrong on the first deploy and looked fine in a green test suite. Set the bank to
   decline everything, buy a ticket, then check the labels:
     curl -sk --resolve app.tickets.lan:443:192.168.1.240 \
