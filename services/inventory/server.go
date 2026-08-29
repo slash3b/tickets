@@ -85,7 +85,7 @@ func (s *Server) Release(ctx context.Context, req *pb.ReleaseRequest) (*pb.Relea
 	if reason == "" {
 		reason = "released"
 	}
-	seatIDs, err := s.store.SeatIDsForHold(ctx, id)
+	eventID, seatIDs, err := s.store.SeatIDsForHold(ctx, id)
 	if err != nil {
 		// Not fatal: the release itself matters more than announcing it.
 		s.lg.Warn("could not read seats for hold before release", zap.Error(err))
@@ -94,8 +94,8 @@ func (s *Server) Release(ctx context.Context, req *pb.ReleaseRequest) (*pb.Relea
 		return nil, status.Error(codes.Internal, "could not release hold")
 	}
 	s.publish(ctx, events.TopicSeatReleased, events.SeatChange{
-		SeatIDs: uuidsToStrings(seatIDs), HoldID: id.String(),
-		Status: "available", Reason: reason,
+		EventID: eventID.String(), SeatIDs: uuidsToStrings(seatIDs),
+		HoldID: id.String(), Status: "available", Reason: reason,
 	})
 	return &pb.ReleaseResponse{}, nil
 }
@@ -118,7 +118,7 @@ func (s *Server) Commit(ctx context.Context, req *pb.CommitRequest) (*pb.CommitR
 	}
 	// Read the seats BEFORE committing: commit consumes the hold, and afterwards
 	// there is no way back from a hold id to the seats it held.
-	seatIDs, sErr := s.store.SeatIDsForHold(ctx, id)
+	eventID, seatIDs, sErr := s.store.SeatIDsForHold(ctx, id)
 	if sErr != nil {
 		s.lg.Warn("could not read seats for hold before commit", zap.Error(sErr))
 	}
@@ -134,7 +134,8 @@ func (s *Server) Commit(ctx context.Context, req *pb.CommitRequest) (*pb.CommitR
 		return nil, status.Error(codes.Internal, "could not commit hold")
 	}
 	s.publish(ctx, events.TopicSeatSold, events.SeatChange{
-		SeatIDs: uuidsToStrings(seatIDs), HoldID: id.String(), Status: "sold",
+		EventID: eventID.String(), SeatIDs: uuidsToStrings(seatIDs),
+		HoldID: id.String(), Status: "sold",
 	})
 	return &pb.CommitResponse{}, nil
 }

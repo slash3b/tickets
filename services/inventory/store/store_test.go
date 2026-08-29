@@ -152,3 +152,39 @@ func TestCommitOnReleasedHoldSignalsRefund(t *testing.T) {
 		t.Fatalf("sold = %d, want 0 — the seats were already gone", sold)
 	}
 }
+
+// TestSeatIDsForHoldCarriesTheEvent guards a bug that reached the cluster.
+//
+// Seat change messages are fanned out to browsers BY EVENT ID. The first version
+// of this function returned only the seats, so the sold and released messages
+// went out with an empty event id and reached nobody — a seat would appear as
+// held on everyone's map and never clear, which is worse than having no live
+// updates at all.
+func TestSeatIDsForHoldCarriesTheEvent(t *testing.T) {
+	s, eventID := newTestStore(t)
+	seats := seedSeats(t, s, eventID, 3)
+	ctx := context.Background()
+
+	holdID, err := s.Hold(ctx, eventID, seats[:2], time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gotEvent, gotSeats, err := s.SeatIDsForHold(ctx, holdID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotEvent != eventID {
+		t.Errorf("event = %s, want %s — an empty event id means the change reaches no browser",
+			gotEvent, eventID)
+	}
+	if len(gotSeats) != 2 {
+		t.Errorf("got %d seats, want 2", len(gotSeats))
+	}
+
+	// And it must survive the commit having consumed the hold, because that is
+	// the ordering the server relies on: read first, then commit.
+	if err := s.Commit(ctx, holdID); err != nil {
+		t.Fatal(err)
+	}
+}

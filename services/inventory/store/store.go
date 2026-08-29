@@ -217,28 +217,36 @@ func (s *Store) OpenEvent(ctx context.Context, eventID uuid.UUID, seatIDs []uuid
 	return int(tag.RowsAffected()), nil
 }
 
-// SeatIDsForHold returns which seats a hold covers.
+// SeatIDsForHold returns which event a hold belongs to and which seats it covers.
 //
-// Needed because a seat change message names SEATS, while release and commit take
-// a HOLD. Read before committing: commit consumes the hold, and afterwards there
-// is no way back from a hold id to the seats it held.
-func (s *Store) SeatIDsForHold(ctx context.Context, holdID uuid.UUID) ([]uuid.UUID, error) {
+// Needed because a seat change message names an EVENT and its SEATS, while
+// release and commit take a HOLD. Read before committing: commit consumes the
+// hold, and afterwards there is no way back from a hold id to either.
+//
+// IT RETURNS THE EVENT ID AND THAT IS NOT INCIDENTAL. The first version returned
+// only seats, so the sold and released messages went out with an empty event id
+// — and the gateway fans out to browsers BY event id, so those two never reached
+// anyone. A hold appearing on the seat map and never clearing is a worse bug than
+// no live updates at all.
+func (s *Store) SeatIDsForHold(ctx context.Context, holdID uuid.UUID) (uuid.UUID, []uuid.UUID, error) {
 	rows, err := s.db.Query(ctx,
-		`SELECT seat_id FROM inventory.hold_seats WHERE hold_id = $1`, holdID)
+		`SELECT event_id, seat_id FROM inventory.hold_seats WHERE hold_id = $1`, holdID)
 	if err != nil {
-		return nil, fmt.Errorf("seats for hold: %w", err)
+		return uuid.Nil, nil, fmt.Errorf("seats for hold: %w", err)
 	}
 	defer rows.Close()
 
+	var eventID uuid.UUID
 	var out []uuid.UUID
 	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
+		var ev, id uuid.UUID
+		if err := rows.Scan(&ev, &id); err != nil {
+			return uuid.Nil, nil, err
 		}
+		eventID = ev
 		out = append(out, id)
 	}
-	return out, rows.Err()
+	return eventID, out, rows.Err()
 }
 
 // SeatStatuses returns the current status of specific seats, for the read model.
