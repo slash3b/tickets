@@ -639,7 +639,6 @@ Monorepo. Go workspace at the root.
     base/               kustomize per service
     overlays/homelab/   what Argo CD actually syncs
   infra/                CLUSTER.md and cluster scripts. Stays as is.
-  tpl/                  becomes the new-service generator, or is deleted.
 
 Each service owns its Dockerfile. Nothing imports another service's internal package -
 they talk over gRPC or Kafka, and pkg/ is the only shared code.

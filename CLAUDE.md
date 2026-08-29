@@ -4,7 +4,8 @@ Monorepo (`git@github.com:slash3b/tickets.git`). A ticket-selling platform built
 operated for real on the homelab cluster — see `DESIGN.md` for the system and `PLAN.md`
 for what gets installed and in what order.
 
-Everything lives in this one repo: `services`, `pkg`, `web`, `deploy`, `infra`, `tpl`.
+Everything lives in this one repo: `services`, `pkg`, `gen`, `proto`, `web`, `deploy`,
+`infra`.
 `cineplex`, the earlier project this grew out of, was deleted on 2026-08-28 once `pkg/`
 had been lifted from it. The `.github/` directory is a separate repo (the `reeldex`
 GitHub org profile, an earlier name for this project) and is gitignored here.

@@ -57,9 +57,13 @@ jobs:
         with: {go-version: '1.25', cache: true}
       # Five files had drifted out of gofmt and nothing noticed, because vet does
       # not check formatting. Cheap to gate, annoying to clean up in bulk later.
+      #
+      # No exclusions. tpl/ used to need one because it was never gofmt-clean;
+      # deleting it made the gate apply to the whole repo, generated code included
+      # (protoc-gen-go emits gofmt-clean output, so that costs nothing).
       - name: gofmt
         run: |
-          unformatted=$(gofmt -l . | grep -v '^tpl/' || true)
+          unformatted=$(gofmt -l . || true)
           if [ -n "$unformatted" ]; then
             echo "not gofmt'd:"; echo "$unformatted"
             gofmt -d $unformatted
