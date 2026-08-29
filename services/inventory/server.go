@@ -14,6 +14,11 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	otelcodes "go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+
 	pb "github.com/slash3b/tickets/gen/tickets/v1"
 	"github.com/slash3b/tickets/pkg/events"
 	"github.com/slash3b/tickets/services/inventory/store"
@@ -176,17 +181,61 @@ func (s *Server) SeatStatuses(ctx context.Context, req *pb.SeatStatusesRequest) 
 	return &pb.SeatStatusesResponse{Statuses: out}, nil
 }
 
+// Sweep reclaims expired holds. Driven by workers on a ticker.
+//
+// THE INSTRUMENTATION LIVES HERE BECAUSE THE SWEEP DOES. It was written into
+// store.Sweeper at milestone 9 — a loop that ran inside this process back when
+// this was a package in the workers binary. The split moved the timer out to
+// workers and this RPC took over the work, and the Sweeper stopped being called
+// by anything. Sweeps kept happening; the span, the counter and the
+// hard-deadline warning silently stopped.
+//
+// That is the third time in this repo that instrumentation has been written and
+// then quietly orphaned, and it is the same shape each time: the code still runs,
+// so nothing fails, and only the absence of telemetry says anything is wrong.
 func (s *Server) Sweep(ctx context.Context, _ *pb.SweepRequest) (*pb.SweepResponse, error) {
+	ctx, span := tracer.Start(ctx, "sweep")
+	defer span.End()
+
 	expired, err := s.store.SweepExpired(ctx)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(otelcodes.Error, "sweep expired")
 		return nil, status.Error(codes.Internal, "sweep expired failed")
 	}
+	span.SetAttributes(attribute.Int("holds.expired", expired))
+	if expired > 0 {
+		swept.Add(ctx, int64(expired), metric.WithAttributes(attribute.String("reason", "expired")))
+	}
+
 	hard, err := s.store.SweepHardDeadline(ctx)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(otelcodes.Error, "sweep hard deadline")
 		return nil, status.Error(codes.Internal, "sweep hard deadline failed")
 	}
+	if len(hard) > 0 {
+		// A hold reaching its HARD deadline was stuck in `converting`, so a payment
+		// outcome was never established. That is a bug signal, not routine cleanup.
+		span.SetAttributes(attribute.Int("holds.hard_deadline", len(hard)))
+		swept.Add(ctx, int64(len(hard)), metric.WithAttributes(attribute.String("reason", "hard_deadline")))
+		s.lg.Warn("holds hit the hard deadline", zap.Int("count", len(hard)))
+	}
+
 	return &pb.SweepResponse{Expired: int32(expired), HardDeadline: int32(len(hard))}, nil
 }
+
+var (
+	tracer = otel.Tracer("inventory")
+	meter  = otel.Meter("inventory")
+
+	// Holds reclaimed by the sweeper, by why. A hold released on its HARD deadline
+	// rather than its TTL means something got stuck in `converting` — a bug
+	// signal, not routine cleanup — and separating them is the whole value.
+	swept, _ = meter.Int64Counter("tickets.holds.swept",
+		metric.WithDescription("Holds reclaimed by the sweeper"),
+		metric.WithUnit("{hold}"))
+)
 
 func uuidsToStrings(ids []uuid.UUID) []string {
 	out := make([]string, len(ids))
