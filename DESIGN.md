@@ -1005,11 +1005,53 @@ MILESTONES
      gateway -> orders -> inventory.Convert -> payments.Charge -> bank ->
      inventory.Commit -> confirmed.
 
-  8  arenas and concerts. Second venue kind, sections, a 20,000-seat chart, on_sale_at
+  8  arenas and concerts.                                     DONE 2026-08-29
+     A second venue kind, a 20,000-seat chart built in about 200ms, and on_sale_at
      in the future for the first time.
-  9  on-sale mode. The Lady Gaga test. Break it, fix it, write down what broke, and only
-     then decide whether it needs a waiting room. This is where the hot partition stops
-     being a paragraph in this document and starts being a graph.
+
+     OPENING THE SEATS IS THE ON-SALE. Nothing in the request path reads
+     on_sale_at and compares it to a clock. Before the moment arrives inventory
+     simply has no rows for the event, so a hold fails the way it fails for a seat
+     that does not exist - which removes the window between checking the time and
+     taking a seat. A workers loop opens them, then records that it did, in that
+     order: opening twice is free because OpenEvent is idempotent, believing an
+     unopened sale is open costs the sale.
+
+     THE BUG A CINEMA COULD NEVER HAVE EXPOSED: seat labels were chr(64 + r),
+     right for eight rows and garbage for fifty. Row 27 was "[" and row 40 "h".
+
+  9  on-sale mode. The Lady Gaga test.                        DONE 2026-08-29
+     3,000 then 4,000 buyers rushing one block of the arena.
+
+     THE FIRST INSTRUMENT WAS WRONG AND THAT WAS THE FIRST FINDING. 500 buyers
+     produced ZERO lost races, because each picked a random section and a random
+     block inside it - 500 darts at a very large board. A real on-sale is not
+     spread out; everybody wants the front of Block 1. With rush mode the same
+     load produced 3,331 lost races out of 4,000, which is what contention looks
+     like.
+
+     WHAT BROKE: the gateway OOMKilled at 128Mi and the simulator at 96Mi. Every
+     memory limit in this repo was a guess made when the biggest thing in the
+     system was a 96-seat cinema, and a 2,000-seat section serialises to twenty
+     times that. The arena did not introduce a bug, it made an old assumption
+     false everywhere at once.
+
+     ALSO BROKE, AND THIS ONE WAS WORSE: the burst ran on the HTTP request
+     context, so when Envoy's default 15-second route timeout hung up on it, the
+     client disconnect CANCELLED THE EXPERIMENT MID-FLIGHT - a partial run
+     reported as a result, and holds left dangling. A rehearsal must outlive the
+     request that started it.
+
+     WHAT DID NOT BREAK: no oversell, in any run, at any point. The conditional
+     UPDATE held while the processes around it were being OOMKilled and
+     restarted. That is the milestone 1 guarantee tested by something other than
+     a unit test for the first time.
+
+     THE ANSWER TO "DOES IT NEED A WAITING ROOM" IS NOT YET. It needs autoscaling,
+     which it now has: at 4,000 buyers the gateway and inventory went to six
+     replicas, catalog, orders and payments to four, nothing restarted, and the
+     sale completed. A waiting room is the answer when scaling stops working, and
+     that has not happened yet.
   10 three brokers, RF=3, min.insync.replicas=2. ISR shrink, leader election, and what
      happens to producers when a broker dies mid-on-sale. Only worth doing once there is
      disk headroom for it.
@@ -1031,6 +1073,10 @@ OPEN QUESTIONS
   - Do concert seats need price tiers that differ by section? Real arenas do. It is
     product work, so it only earns a place if it makes contention more interesting.
   - Postgres connection pooling: pgbouncer, or is Go's pool enough at this scale?
+    STILL OPEN but now measurable rather than arguable - pgxpool.acquire_duration
+    and pgxpool.empty_acquire_wait_time are in SigNoz. Note the question changed
+    shape when inventory started scaling horizontally: six replicas each hold
+    their own pool, so the count that matters is now per-service times replicas.
   - Do orders and payments stay separate services, or is that a split made for the sake
     of having services? Revisit after milestone 3 and be willing to merge them.
   - ANSWERED at milestone 7: neither. A static nginx container, with /api routed to

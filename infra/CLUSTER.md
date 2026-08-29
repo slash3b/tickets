@@ -878,6 +878,37 @@ THE APPLICATION - DEPLOYED 2026-08-27
   replicas do N times the work on the same rows and multiply traffic to the bank.
   strategy: Recreate is deliberate - a rolling update would briefly run two.
 
+  AUTOSCALING, BOTH KINDS, ADDED 2026-08-29 after the first on-sale OOMKilled the
+  gateway and the simulator.
+
+    VPA 1.7.1  ns vpa, Argo app `vpa`, wave 1. Chart fairwinds/vpa 5.0.0.
+               Owns MEMORY only. updateMode InPlaceOrRecreate.
+    HPA        autoscaling/v2 objects in deploy/apps/tickets/hpa.yaml.
+               Owns CPU only.
+
+  THEY MUST OWN DIFFERENT RESOURCES OR THEY OSCILLATE. VPA changes a pod's
+  request; HPA scales on utilisation as a percentage OF that request, so pointing
+  both at the same resource makes each one's action change the other's input. The
+  split is also right for this system: memory is driven by the size of a seat map,
+  which is a property of the venue, and CPU by how many people are asking.
+
+  VPA IS USABLE HERE ONLY BECAUSE OF THE KUBERNETES VERSION. 1.36 exposes the
+  pods/resize subresource, so VPA 1.7 changes a running pod's resources IN PLACE
+  rather than evicting it. Check before assuming on another cluster:
+    kubectl get --raw /api/v1 | grep pods/resize
+
+  NEITHER TOUCHES workers, AND THAT IS NOT AN OVERSIGHT. It runs the singletons -
+  both sweepers, the reconciler, the resumer. N replicas do N times the work on
+  the same rows and multiply traffic to the bank by N. Argo also still enforces
+  its replica count, because ignoreDifferences for /spec/replicas is listed BY
+  NAME for the six scalable services rather than for all Deployments.
+
+  Without that ignoreDifferences, selfHeal reverts every scale-up within seconds,
+  during exactly the burst that needed the capacity.
+
+  VERIFIED 2026-08-29 under 4,000 buyers: gateway 1->6, inventory 1->6, catalog,
+  orders and payments 1->4, workers stayed at 1, nothing restarted, no oversell.
+
   THE GATEWAY HAS NO DATABASE CREDENTIALS. That is deliberate and worth not
   undoing: it cannot reach Postgres at all, so the front door cannot read or write
   a table even by mistake. Only catalog, inventory, orders and payments hold the
