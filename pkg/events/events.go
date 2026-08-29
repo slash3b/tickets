@@ -128,10 +128,14 @@ func (p *Publisher) Publish(ctx context.Context, topic string, c SeatChange) {
 		p.lg.Warn("seat change would not marshal", zap.Error(err))
 		return
 	}
+	ctx, headers, end := startPublish(ctx, topic, c.EventID, len(body))
+	defer end()
+
 	if err := p.w.WriteMessages(ctx, kafka.Message{
-		Topic: topic,
-		Key:   []byte(c.EventID),
-		Value: body,
+		Topic:   topic,
+		Key:     []byte(c.EventID),
+		Value:   body,
+		Headers: headers,
 	}); err != nil {
 		p.lg.Warn("seat change not queued", zap.String("topic", topic), zap.Error(err))
 	}
@@ -152,10 +156,14 @@ func (p *Publisher) PublishOrder(ctx context.Context, topic string, c OrderChang
 		p.lg.Warn("order change would not marshal", zap.Error(err))
 		return
 	}
+	ctx, headers, end := startPublish(ctx, topic, c.OrderID, len(body))
+	defer end()
+
 	if err := p.w.WriteMessages(ctx, kafka.Message{
-		Topic: topic,
-		Key:   []byte(c.OrderID),
-		Value: body,
+		Topic:   topic,
+		Key:     []byte(c.OrderID),
+		Value:   body,
+		Headers: headers,
 	}); err != nil {
 		p.lg.Warn("order change not queued", zap.String("topic", topic), zap.Error(err))
 	}
@@ -176,8 +184,11 @@ func (p *Publisher) Close() error {
 // of them — and a browser connected to any of the other five would never hear
 // about it. This is a broadcast, not a work queue: every replica needs every
 // message. The group id therefore includes something unique per process.
+// fn RECEIVES THE MESSAGE'S CONTEXT, not the process one. That context carries
+// the consumer span, so anything the handler does — a Redis write, a fan-out to
+// SSE clients — hangs off the publish that caused it instead of off nothing.
 func Subscribe(ctx context.Context, brokers []string, topics []string, groupID string,
-	lg *zap.Logger, fn func(topic string, c SeatChange)) {
+	lg *zap.Logger, fn func(ctx context.Context, topic string, c SeatChange)) {
 
 	for _, topic := range topics {
 		go func(topic string) {
@@ -216,7 +227,15 @@ func Subscribe(ctx context.Context, brokers []string, topics []string, groupID s
 					lg.Warn("undecodable seat change", zap.String("topic", topic), zap.Error(err))
 					continue
 				}
-				fn(topic, c)
+
+				// The handler runs INSIDE the consumer span, so whatever it does
+				// — a Redis write, a fan-out to SSE clients — hangs off the
+				// publish that caused it rather than off nothing.
+				func() {
+					msgCtx, end := startConsume(ctx, m, groupID)
+					defer end()
+					fn(msgCtx, topic, c)
+				}()
 			}
 		}(topic)
 	}

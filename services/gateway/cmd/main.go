@@ -129,12 +129,15 @@ func run() error {
 		groupID := "gateway-stream-" + host
 		events.Subscribe(ctx, brokers,
 			[]string{events.TopicSeatHeld, events.TopicSeatReleased, events.TopicSeatSold},
-			groupID, lg, func(_ string, c events.SeatChange) {
+			groupID, lg, func(msgCtx context.Context, _ string, c events.SeatChange) {
 				// ONE STREAM, TWO CONSUMERS OF IT. The same message that reaches
 				// browsers also keeps the projection current — which is why adding
 				// a cache here introduced no new invalidation problem. The events
 				// that already had to exist are the invalidation.
-				seatCache.Apply(ctx, c.EventID, c.SeatIDs, c.Status)
+				//
+				// msgCtx, not the process ctx: the cache write belongs UNDER the
+				// consume span, which is itself under the publish that caused it.
+				seatCache.Apply(msgCtx, c.EventID, c.SeatIDs, c.Status)
 				api.Broadcast(c)
 			})
 		lg.Info("live seat map on", zap.String("kafka", kafkaAddr), zap.String("group", groupID))

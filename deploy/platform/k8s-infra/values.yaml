@@ -120,3 +120,45 @@ otelDeployment:
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits:   {memory: 384Mi}
+
+# KAFKA METRICS, added 2026-08-29 to feed SigNoz's Messaging Queues page
+# (https://signoz.tickets.lan/messaging-queues/kafka). That page was empty because
+# nothing was producing kafka metrics at all — Strimzi has no metricsConfig, so
+# there is no JMX exporter, and no collector was scraping the brokers.
+#
+# THE `metrics/scraper` PIPELINE IS DECLARED EMPTY BY THE CHART for exactly this.
+# The presets fill metrics/internal (k8s_cluster) and logs (k8s_events) and leave
+# this one alone, so adding a receiver here does not fight them.
+#
+# ONE COLLECTOR, NOT THE DAEMONSET. These are cluster-wide facts about the Kafka
+# cluster, not per-node ones; scraping them from every node would multiply every
+# series by the node count and say nothing new.
+#
+# THE CONSUMER SCRAPER WILL SHOW MANY SHORT-LIVED GROUPS, and that is our design
+# rather than a fault: pkg/events subscribes with a UNIQUE GROUP PER PROCESS so
+# every replica sees every message (broadcast, not work-queue). Group lag is
+# therefore per-pod and resets when a pod does. Topic and partition metrics are
+# the stable ones to read.
+otelDeployment:
+  config:
+    receivers:
+      kafkametrics:
+        brokers:
+          - tickets-kafka-kafka-bootstrap.data.svc.cluster.local:9092
+        # The plaintext listener, the same one every service uses. 9091 is
+        # Strimzi's TLS replication listener and is not for clients.
+        protocol_version: 3.6.0
+        scrapers:
+          - brokers
+          - topics
+          - consumers
+        # Slower than the 30s default would suggest is needed: offsets move
+        # constantly but the questions asked of them are minutes-wide, and this
+        # is a homelab with one small ClickHouse.
+        collection_interval: 60s
+    service:
+      pipelines:
+        metrics/scraper:
+          receivers: [kafkametrics]
+          processors: [batch]
+          exporters: [otlphttp]
