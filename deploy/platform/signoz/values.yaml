@@ -92,6 +92,18 @@ clickhouse:
         <latency_log remove="1"/>
         <query_metric_log remove="1"/>
 
+        <!-- metric_log was KEPT by the earlier decision, on the stated grounds
+             that it and query_log were "both small". That premise turned out to
+             be false: after everything else was disabled it was 206 MiB and the
+             ONLY thing still merging, seven merges at a time, and node-2 was
+             still at 56% CPU because of it. It writes a row per second per
+             metric about ClickHouse's own internals — which is what SigNoz is
+             for, and SigNoz is the thing this database exists to serve.
+
+             query_log stays. It is how you find a slow query, and it is the one
+             system table that has ever been useful here. -->
+        <metric_log remove="1"/>
+
         <!-- Newer tables the original list predates. aggregated_zookeeper_log
              had 6.3 MILLION rows, which is a lot of bookkeeping about
              bookkeeping for a single-replica ClickHouse. -->
