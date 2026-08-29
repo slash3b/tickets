@@ -93,9 +93,22 @@ clickhouse:
             - matchExpressions:
                 - key: node-role.kubernetes.io/control-plane
                   operator: DoesNotExist
+    # ITS HEAP WAS BIGGER THAN ITS CONTAINER, which is why it restarted 67 times.
+    # The chart ships heapSize 1024 — a 1GB JVM heap — inside a 512Mi limit, so
+    # the JVM is told it may use twice what the cgroup allows. It grows into the
+    # heap it was promised, crosses the limit, and is killed. Found at 503Mi of
+    # 512Mi: about to do it again.
+    #
+    # Fixed by making the heap FIT rather than by spending more memory. This
+    # ZooKeeper coordinates exactly one ClickHouse replica, so its znode count is
+    # tiny and 384MB is generous. The limit sits ABOVE the heap to leave room for
+    # the JVM's non-heap overhead, which is what makes "heap = limit" still crash.
+    #
+    # VPA does not manage this namespace, so these stay hand-set numbers.
+    heapSize: 384
     resources:
       requests: {cpu: 50m, memory: 256Mi}
-      limits:   {memory: 512Mi}
+      limits:   {memory: 768Mi}
 
 otelCollector:
   # The OTLP ingest point. Services send here and know nothing about what is behind
