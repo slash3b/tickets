@@ -878,6 +878,32 @@ THE APPLICATION - DEPLOYED 2026-08-27
   replicas do N times the work on the same rows and multiply traffic to the bank.
   strategy: Recreate is deliberate - a rolling update would briefly run two.
 
+  KAFKA IS NO LONGER INERT, as of 2026-08-29. From phase 0.7 until then a broker
+  ran doing nothing while DESIGN.md described an event-driven system that was
+  entirely synchronous - which is exactly the "installed but unused" state this
+  file exists to call out, and did not.
+
+    topics   inventory.seat.held / .released / .sold, as KafkaTopic CRs in
+             deploy/data/topics.yaml. One partition each: there is one broker,
+             so more partitions buy no parallelism.
+    producer inventory, async, after the database commit
+    consumer every gateway replica, EACH WITH ITS OWN GROUP ID
+    exposed  GET /api/events/{id}/stream, server-sent events
+
+  THE SEAT MAP IS PUSHED NOW. Browsers used to poll a whole section every two
+  seconds - a gateway request, a catalog call and an inventory call each time,
+  almost always to be told nothing had changed. That cost grew with the SIZE OF
+  THE VENUE rather than with how much was happening, which is backwards for an
+  on-sale.
+
+  THE SSE ROUTE NEEDS A LONG TIMEOUT. Envoy's default is 15 seconds and would
+  sever the stream every fifteen seconds forever - the same default that killed
+  the first on-sale burst. deploy/apps/tickets/web.yaml gives /api/events 3600s.
+
+  IT IS ALL OPTIONAL. No KAFKA_BROKERS means the publisher is nil, every publish
+  is a no-op, and the frontend falls back to polling. The broker is not something
+  these services refuse to start without.
+
   AUTOSCALING, BOTH KINDS, ADDED 2026-08-29 after the first on-sale OOMKilled the
   gateway and the simulator.
 

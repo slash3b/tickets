@@ -503,6 +503,12 @@ RETENTION IS THE WHOLE GAME ON THIS HARDWARE
 EVENTS
 ------
 
+STATUS 2026-08-29: the inventory.seat.* topics are LIVE — inventory publishes,
+the gateway consumes, and browsers get the seat map pushed over SSE instead of
+polling for it. The orders.* and payments.* topics below are still SPECIFIED AND
+NOT PRODUCED; nothing needs them yet, and inventing consumers for them would be
+building infrastructure for an imagined reader.
+
 At-least-once. Every consumer must be idempotent; assume every message arrives twice.
 Every topic below names its partition key, because on Kafka the key is a design decision
 and not a detail - it fixes both ordering and where load lands.
@@ -524,7 +530,26 @@ and not a detail - it fixes both ordering and where load lands.
                                        rebuildable source for the seat-map read model.
 
 The inventory.seat.* topics are what gateway fans out to browsers, and they are the only
-ones the frontend cares about.
+ones the frontend cares about. That is now literally true rather than a plan.
+
+  EACH GATEWAY REPLICA CONSUMES WITH ITS OWN GROUP ID. This is the opposite of
+  the usual advice and it is required: a consumer group SPLITS partitions between
+  its members, so six gateway replicas in one group means each message reaches
+  exactly one of them and browsers connected to the other five never hear it.
+  This is a broadcast, not a work queue.
+
+  PUBLISHING IS ASYNC AND HAPPENS AFTER THE COMMIT. A seat claim must never wait
+  on a broker - the transaction is done and the customer is owed an answer. A
+  broker that is slow or gone means a stale read model, which is a bad day; a
+  broker in the path of every purchase is a broken system.
+
+  THE PAYLOAD IS A STATE, NOT A DELTA, which is what makes at-least-once safe
+  without any deduplication: "this seat is now sold" applied twice is still sold.
+
+  A MESSAGE MUST CARRY ITS EVENT ID. Commit and release only have a hold id, and
+  the first version published them without one - so those two never reached any
+  browser, and a seat appeared held on every open map and never cleared. A stale
+  map that looks live is worse than one that is honestly a few seconds old.
 
 The orders.* and payments.* topics key by order_id, which spreads perfectly - orders are
 independent of each other and nothing needs cross-order ordering. The inventory topics
