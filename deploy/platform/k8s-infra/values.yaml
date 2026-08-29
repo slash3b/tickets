@@ -44,6 +44,34 @@ presets:
     #
     # The collector and the agent stay collected - they are small, and their logs
     # are how you debug the pipeline itself.
+    # EVERY OTLP-PUSHING SERVICE IS EXCLUDED HERE, AND THAT IS NOT A GAP.
+    #
+    # pkg/logger tees each line to stdout AND to OTLP on purpose: stdout so
+    # `kubectl logs` works when the telemetry pipeline is down, OTLP so the line
+    # lands beside its trace. This agent tails stdout, so leaving these in stored
+    # BOTH copies of every line - measured at 8,003 filelog records against 2,828
+    # OTLP records in thirty minutes, with catalog, inventory, orders, payments,
+    # simulator and seeder matching their OTLP counts exactly.
+    #
+    # THE TWO COPIES ARE NOT EQUALLY GOOD. The OTLP record carries trace_id,
+    # span_id, severity and customer_id as real indexed fields. The filelog copy
+    # is the raw zap JSON in the body with NOTHING parsed out - trace_id empty on
+    # all 8,003 of them - so it cannot be correlated, only grepped. Keeping the
+    # correlated copy and dropping the blob is the whole decision.
+    #
+    # WHAT THIS COSTS: a panic goes to stderr and the SDK never gets to flush it,
+    # so a crash message no longer reaches SigNoz. It is still in the pod:
+    #   kubectl -n tickets logs <pod> --previous
+    # and the restart itself is visible in kubeletMetrics. That is the trade -
+    # accepted because a crash is a thing you already go to the pod for, while
+    # correlation is a thing you need a thousand times a day.
+    #
+    # web IS NOT LISTED. It is nginx, it has no SDK, and this agent is the only
+    # way its access logs are collected at all.
+    #
+    # MATCHING IS BY CONTAINER NAME AND IS NOT NAMESPACED, so these names must
+    # stay unique across the cluster. Checked when this was written: each of them
+    # appears in exactly one namespace.
     blacklist:
       enabled: true
       signozLogs: true
@@ -51,6 +79,21 @@ presets:
         - kube-system
       containers:
         - clickhouse
+        - bank
+        - catalog
+        - gateway
+        - inventory
+        - orders
+        - payments
+        - seeder
+        - simulator
+        - workers
+        # Inert and loud. argocd-notifications-cm is EMPTY - nothing is
+        # configured to notify anything - and the controller still wrote 2,550
+        # lines an hour, more than every tickets service combined. The
+        # application-controller and repo-server stay collected: those are what
+        # you read when a sync fails.
+        - argocd-notifications-controller
   hostMetrics:
     enabled: true
   kubeletMetrics:

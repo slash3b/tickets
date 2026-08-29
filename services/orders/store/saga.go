@@ -75,22 +75,42 @@ func (sg *Saga) Run(ctx context.Context, orderID uuid.UUID) error {
 		return fmt.Errorf("order %s not found", orderID)
 	}
 
+	// The step the loop was last in, so a failure can say where it died. Read by
+	// the deferred metric below, which runs after the loop has exited.
+	lastStep := string(o.State)
+
 	// The state it finishes in is the one thing every reader wants, and it is only
 	// known once the loop stops.
 	defer func() {
 		span.SetAttributes(attribute.String("order.state", string(o.State)))
-		if isTerminal(o.State) {
-			orders.Add(ctx, 1, metric.WithAttributes(attribute.String("state", string(o.State))))
+		if !isTerminal(o.State) {
+			return
+		}
+
+		// failed_at names the step that ended it. Without it every failure is one
+		// undifferentiated number and "orders are failing" cannot be narrowed to
+		// "the bank is down" or "holds are expiring before checkout".
+		attrs := []attribute.KeyValue{attribute.String("state", string(o.State))}
+		if o.State == StateFailed {
+			attrs = append(attrs, attribute.String("failed_at", lastStep))
+		}
+		orders.Add(ctx, 1, metric.WithAttributes(attrs...))
+
+		if !o.CreatedAt.IsZero() {
+			sagaDuration.Record(ctx, time.Since(o.CreatedAt).Seconds(),
+				metric.WithAttributes(attribute.String("state", string(o.State))))
 		}
 	}()
 
 	for {
 		before := o.State
+		lastStep = string(o.State)
 
 		// One span per STEP, named after the state being left. This is where the
 		// forward-recovery gap becomes visible: a trace that stops at "paid" with
 		// no commit span is exactly the crash the resumer exists to finish.
 		stepCtx, step := tracer.Start(ctx, "saga."+string(o.State))
+		startedAt := time.Now()
 
 		switch o.State {
 		case StateCreated:
@@ -103,6 +123,16 @@ func (sg *Saga) Run(ctx context.Context, orderID uuid.UUID) error {
 			step.End()
 			return nil // terminal, or waiting on something outside the saga
 		}
+
+		outcome := "ok"
+		if err != nil {
+			outcome = "error"
+		}
+		stepDuration.Record(ctx, time.Since(startedAt).Seconds(), metric.WithAttributes(
+			attribute.String("step", before2step(before)),
+			attribute.String("outcome", outcome),
+		))
+
 		if err != nil {
 			step.RecordError(err)
 			step.SetStatus(codes.Error, "saga step failed")
@@ -290,6 +320,27 @@ var (
 		metric.WithDescription("Orders reaching a terminal state"),
 		metric.WithUnit("{order}"))
 
+	// HOW LONG A PURCHASE ACTUALLY TAKES, measured from the order row being
+	// created to the saga reaching a terminal state — NOT the duration of one Run
+	// call. Those are different numbers whenever the resumer finishes an order the
+	// original request abandoned, and the customer experienced the first one.
+	//
+	// Split by state, because a fast failure and a fast confirmation are both
+	// "fast" and mean opposite things.
+	sagaDuration, _ = meter.Float64Histogram("tickets.saga.duration",
+		metric.WithDescription("Order lifetime, creation to terminal state"),
+		metric.WithUnit("s"))
+
+	// WHERE THE TIME GOES, per step. The spans already show this for one order;
+	// the histogram is what answers "is charge slower this week than last" without
+	// finding a representative trace by hand.
+	//
+	// outcome is on here because a failed step's latency is a different
+	// distribution from a successful one and averaging them hides both.
+	stepDuration, _ = meter.Float64Histogram("tickets.saga.step.duration",
+		metric.WithDescription("Duration of one saga step"),
+		metric.WithUnit("s"))
+
 	// Orders the resumer had to finish because their request died mid-saga. A
 	// non-zero rate here is not an error — it is the design working — but a
 	// RISING one means requests are dying more often than they used to.
@@ -297,3 +348,20 @@ var (
 		metric.WithDescription("Orders completed by the resumer rather than their own request"),
 		metric.WithUnit("{order}"))
 )
+
+// before2step names a step by the work it does rather than the state it starts
+// from. "created" is a state; "convert_hold" is what happens there, and it is the
+// same word the saga_log rows use — so a metric and a database row can be read
+// side by side without a translation table in the reader's head.
+func before2step(st State) string {
+	switch st {
+	case StateCreated:
+		return "convert_hold"
+	case StateAwaitingPayment:
+		return "charge"
+	case StatePaid:
+		return "commit"
+	default:
+		return string(st)
+	}
+}

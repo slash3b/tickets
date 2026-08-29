@@ -197,8 +197,20 @@ button.ghost { background: transparent; color: var(--muted); border: 1px solid v
 
 /* Your own id, shown so it can be copied straight into a trace search. Quiet —
    it is a debugging affordance, not part of buying a ticket. */
+.headrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* The operator page is one click away, but styled to be the quietest thing in
+   the header - it is not part of buying a ticket. */
+.oplink {
+  color: #7d858f;
+  font-size: 0.72rem;
+  text-decoration: none;
+  border-bottom: 1px dotted #2a2f36;
+  margin-top: 0.35rem;
+}
+.oplink:hover { color: #9aa3ae; border-bottom-color: #3c434d; }
+
 .whoami {
-  align-self: flex-start;
   background: none;
   border: 1px dashed #2a2f36;
   color: #7d858f;

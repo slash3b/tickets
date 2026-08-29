@@ -33,13 +33,30 @@ func MustNew(service string, debug bool, provider otellog.LoggerProvider) (*zap.
 
 	lg := stdout
 	if provider != nil {
+		// THE OTLP CORE MUST BE GATED AT THE SAME LEVEL AS STDOUT.
+		//
+		// otelzap.Core.Enabled asks the OTel log SDK, and the SDK with no
+		// minimum-severity processor says yes to everything — including Debug.
+		// zapcore.Tee enables an entry if ANY core wants it, so an ungated bridge
+		// quietly ships every Debug line to the backend while stdout, correctly at
+		// Info, shows none of them. The two halves of one logger then disagree
+		// about what was logged, which is the worst way to find out.
+		//
+		// It was measurable: workers put 2,133 lines into SigNoz over six hours
+		// and 10 into its own stdout, because nearly everything it says per tick
+		// is Debug.
+		otel, err := zapcore.NewIncreaseLevelCore(
+			otelzap.NewCore(service, otelzap.WithLoggerProvider(provider)),
+			cfg.Level,
+		)
+		if err != nil {
+			panic(err)
+		}
+
 		// Tee, not replace. If the collector is down, stdout still has everything —
 		// losing the ability to debug a pod exactly when telemetry is broken would
 		// be the worst possible trade.
-		lg = zap.New(zapcore.NewTee(
-			stdout.Core(),
-			otelzap.NewCore(service, otelzap.WithLoggerProvider(provider)),
-		))
+		lg = zap.New(zapcore.NewTee(stdout.Core(), otel))
 	}
 
 	return lg.With(zap.String("service.name", service)), lg.Sync

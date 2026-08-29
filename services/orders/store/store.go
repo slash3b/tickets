@@ -41,6 +41,7 @@ type Order struct {
 	AmountMinor   int64
 	State         State
 	FailureReason string
+	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
 
@@ -69,10 +70,10 @@ func (s *Store) Get(ctx context.Context, id uuid.UUID) (*Order, error) {
 	var o Order
 	err := s.db.QueryRow(ctx,
 		`SELECT id, hold_id, event_id, user_id, amount_minor, state,
-		        coalesce(failure_reason,''), updated_at
+		        coalesce(failure_reason,''), created_at, updated_at
 		   FROM orders.orders WHERE id = $1`, id).
 		Scan(&o.ID, &o.HoldID, &o.EventID, &o.UserID, &o.AmountMinor, &o.State,
-			&o.FailureReason, &o.UpdatedAt)
+			&o.FailureReason, &o.CreatedAt, &o.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -120,7 +121,7 @@ func (s *Store) LogAttempt(ctx context.Context, id uuid.UUID, step string) error
 func (s *Store) InFlight(ctx context.Context, minAge time.Duration, limit int) ([]*Order, error) {
 	rows, err := s.db.Query(ctx,
 		`SELECT id, hold_id, event_id, user_id, amount_minor, state,
-		        coalesce(failure_reason,''), updated_at
+		        coalesce(failure_reason,''), created_at, updated_at
 		   FROM orders.orders
 		  WHERE state IN ('created','awaiting_payment','paid','reconciling')
 		    AND updated_at < now() - $1::interval
@@ -134,7 +135,7 @@ func (s *Store) InFlight(ctx context.Context, minAge time.Duration, limit int) (
 	for rows.Next() {
 		var o Order
 		if err := rows.Scan(&o.ID, &o.HoldID, &o.EventID, &o.UserID, &o.AmountMinor,
-			&o.State, &o.FailureReason, &o.UpdatedAt); err != nil {
+			&o.State, &o.FailureReason, &o.CreatedAt, &o.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, &o)

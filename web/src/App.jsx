@@ -236,13 +236,16 @@ export default function App() {
         <p className="sub">
           {event ? `${event.venue} · ${new Date(event.starts_at).toLocaleString()}` : 'loading…'}
         </p>
-        <button
-          className="whoami"
-          title="Your id in the traces and logs. Click to copy — paste it into SigNoz to see everything you did."
-          onClick={() => navigator.clipboard?.writeText(customerID)}
-        >
-          you are <code>{customerID}</code>
-        </button>
+        <div className="headrow">
+          <button
+            className="whoami"
+            title="Your id in the traces and logs. Click to copy — paste it into SigNoz to see everything you did."
+            onClick={() => navigator.clipboard?.writeText(customerID)}
+          >
+            you are <code>{customerID}</code>
+          </button>
+          <a className="oplink" href="/admin">operator →</a>
+        </div>
       </header>
 
       {events.length > 1 && (

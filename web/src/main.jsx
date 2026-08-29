@@ -7,8 +7,8 @@ import './style.css'
 // Two pages, no router library. One check of the path is the whole of the routing
 // this app needs, and a dependency for that would be more code than it replaces.
 //
-// The admin page is deliberately not linked from the seat map: it is reachable by
-// typing /admin, and nobody arrives there by clicking around while buying a ticket.
+// The admin page is linked from the seat map header, styled to be the quietest
+// thing there. It is an operator page on a LAN-only host, not a secret.
 const page = window.location.pathname.startsWith('/admin') ? <Admin /> : <App />
 
 createRoot(document.getElementById('root')).render(page)
