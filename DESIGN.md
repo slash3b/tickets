@@ -1180,6 +1180,63 @@ MILESTONES
      services and onto every log line; a 30-buyer burst produced 30 customers, 30
      traces, and a largest trace of 98 spans - one buyer's saga, not everyone's.
 
+  12 what the telemetry was not saying.                       DONE 2026-08-29
+     Prompted by one observation - the logs looked half empty - which turned out
+     to be three unrelated defects and one real gap.
+
+     THE OTLP HALF OF THE LOGGER IGNORED THE LOG LEVEL. otelzap.Core.Enabled asks
+     the OTel SDK, and the SDK with no minimum-severity processor says yes to
+     everything, including Debug. zapcore.Tee enables an entry if ANY core wants
+     it, so every Debug line shipped to the backend while stdout, correctly at
+     Info, showed none of them. Workers had 2,133 lines in SigNoz and 10 in its
+     own stdout over six hours. THE TWO HALVES OF ONE LOGGER DISAGREED ABOUT WHAT
+     WAS LOGGED, which is the worst possible way to find out.
+
+     EVERY LINE WAS STORED TWICE. pkg/logger tees to stdout and OTLP on purpose;
+     the node agent also tails stdout, so both copies landed - 8,003 filelog
+     records against 2,828 OTLP records in thirty minutes. They are not equally
+     good: the OTLP record has trace_id, span_id, severity and customer_id as
+     indexed fields, and the filelog copy is the raw zap JSON with nothing parsed,
+     trace_id empty on all 8,003. Excluded the OTLP-pushing containers from
+     collection. Cluster log volume fell 22,540/hour -> 10,080/hour.
+
+     THE COST, RECORDED SO IT IS A CHOICE AND NOT A SURPRISE: a panic goes to
+     stderr and the SDK never flushes it, so a crash message no longer reaches
+     SigNoz. `kubectl logs --previous` still has it and the restart is in
+     kubeletMetrics. A crash is a thing you go to the pod for; correlation is a
+     thing you need a thousand times a day.
+
+     THE SAGA HAD SPANS AND ALMOST NO METRICS. saga.Run, saga.created,
+     saga.awaiting_payment, saga.paid, saga.confirmed and saga.failed were all
+     there and are genuinely the clearest picture of this system. But a span
+     answers "what happened to this order" and nothing answered "what is happening
+     to orders". Added order lifetime by terminal state, per-step duration by
+     outcome, the step a failure died at, and a payments outcome counter.
+
+     tickets.payments EXISTS BECAUSE `unknown` WAS INVISIBLE. Every layer of this
+     design is careful that unknown is not failed, and that distinction lived only
+     in the database. From outside, a bank that has stopped answering and a bank
+     declining everything look identical: orders stop confirming. They need
+     opposite responses - wait for the reconciler, or stop selling - so the rate
+     of each has to be graphable.
+
+     THEN THE NEW METRICS WERE WRONG, TWICE, AND A GREEN TEST SUITE DID NOT CARE.
+     Forcing the bank to decline 100% in the cluster is what showed it:
+
+       failed_at reported `failed` on every failure. It tracked the last state the
+       loop entered, and a declined saga enters `failed` before the loop exits, so
+       the label named the resting place instead of the step.
+
+       Every declined charge recorded outcome=ok, because the outcome was read
+       from err and a decline returns nil on purpose - the call worked, the answer
+       was no. That made the one comparison worth having, rejected against
+       accepted latency, unaskable.
+
+     BOTH BUGS HAD THE SAME SHAPE AS THE ONES IN 7b AND THE AUDIT: instrumentation
+     that runs, never errors, and quietly answers the wrong question. There is no
+     way to catch that by reading the code. You have to make the system do the
+     thing and then go look at what the telemetry said about it.
+
 Milestone 1 is deliberately unglamorous. If the seat-claim primitive is wrong, every
 milestone after it is built on sand, and it is far cheaper to find that out with a
 goroutine test than with a simulator and seven deployments in the way.

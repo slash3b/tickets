@@ -639,6 +639,57 @@ OBSERVABILITY - SIGNOZ, INSTALLED 2026-08-24
   produced 30 distinct customers in 30 distinct traces, each linked back to the
   on-sale burst span rather than nested under it.
 
+  LOG COLLECTION, CORRECTED 2026-08-29. Volume was 22,540 lines/hour and most of
+  it said nothing. Three things were wrong:
+
+    Every service's logs were stored TWICE. pkg/logger tees to stdout and OTLP by
+    design; the node agent also tails stdout. Measured 8,003 filelog records
+    against 2,828 OTLP records in thirty minutes, with catalog, inventory, orders,
+    payments, simulator and seeder matching their OTLP counts exactly. Only the
+    OTLP copy carries trace_id - it was empty on all 8,003 filelog records.
+    Fixed in deploy/platform/k8s-infra/values.yaml: those containers are on the
+    logsCollection blacklist. web is NOT, because it is nginx and has no SDK.
+
+    The OTLP half of the logger ignored the log level, so Debug lines shipped to
+    the backend while stdout showed none of them. Fixed in pkg/logger.
+
+    argocd-notifications-controller wrote 2,550 lines/hour with
+    argocd-notifications-cm EMPTY - nothing configured to notify anything.
+    Blacklisted. application-controller and repo-server stay: those are what you
+    read when a sync fails.
+
+  After: 10,080 lines/hour, and the only container in tickets still collected
+  from stdout is web.
+
+  WHAT THIS COSTS: a panic goes to stderr and the SDK never flushes it, so crash
+  output no longer reaches SigNoz. Recover it with
+    kubectl -n tickets logs <pod> --previous
+  The restart itself is still visible in kubeletMetrics.
+
+  APPLICATION METRICS, as of 2026-08-29. Infrastructure metrics were already
+  complete - http.server/client.request.duration, rpc.server/client.call.duration,
+  the full pgxpool set on the four services that own a database, go runtime on all
+  nine. The business metrics were the gap:
+
+    tickets.holds                by outcome: won, lost, error, exhausted
+    tickets.hold.contention      retryable conflicts, the early warning
+    tickets.holds.swept          by why: ttl or hard deadline
+    tickets.orders               terminal state, plus failed_at naming the step
+    tickets.orders.resumed       finished by the resumer, not their own request
+    tickets.payments             succeeded, declined, UNKNOWN
+    tickets.saga.duration        order lifetime, creation to terminal, by state
+    tickets.saga.step.duration   by step and outcome
+    tickets.payments.reconciled
+
+  VERIFY THEM BY FORCING THE FAILURE, NOT BY READING THE CODE. Two of these were
+  wrong on the first deploy and looked fine in a green test suite. Set the bank to
+  decline everything, buy a ticket, then check the labels:
+    curl -sk --resolve app.tickets.lan:443:192.168.1.240 \
+      -X PUT https://app.tickets.lan/admin/bank/config \
+      -H 'Content-Type: application/json' -d '{"decline_rate":1.0}'
+  PUT IT BACK TO 0.05 AFTERWARDS. It is a live setting on a running system and
+  nothing resets it for you.
+
   The seeder was worse. It passed nil as the log provider and never called
   obs.Setup at all, and its manifest had no OTLP endpoint, so the one job that
   decides whether there is anything to sell tomorrow reported nothing at all. A
