@@ -78,7 +78,7 @@ func run() error {
 	}
 
 	grpcSrv := grpcx.NewServer(lg)
-	pb.RegisterCatalogServiceServer(grpcSrv, catalog.NewServer(store.New(pool)))
+	pb.RegisterCatalogServiceServer(grpcSrv, catalog.NewServer(store.New(pool), lg))
 
 	// TWO LISTENERS, DELIBERATELY. gRPC serves the peers; a tiny HTTP server
 	// serves /livez and /readyz, because kubelet probes speak HTTP and wiring

@@ -92,7 +92,7 @@ func buildSystem(t *testing.T, bankCfg bank.Config) (*httptest.Server, *catalogs
 	bankCli := bankclient.New(bankSrv.URL, 2*time.Second)
 
 	catConn := serveGRPC(t, nop, func(s *grpc.Server) {
-		pb.RegisterCatalogServiceServer(s, catalog.NewServer(cat))
+		pb.RegisterCatalogServiceServer(s, catalog.NewServer(cat, nop))
 	})
 	invConn := serveGRPC(t, nop, func(s *grpc.Server) {
 		pb.RegisterInventoryServiceServer(s, inventory.NewServer(inv, nop))

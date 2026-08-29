@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -104,5 +105,40 @@ func TestEventNotYetOnSaleIsHidden(t *testing.T) {
 	}
 	if len(events) != 0 {
 		t.Fatalf("returned %d events; one that is not on sale yet must not be listed", len(events))
+	}
+}
+
+// TestLookupsDistinguishMissingFromBroken guards a bug that shipped and reached
+// the cluster.
+//
+// FindVenueByName used to `return uuid.Nil, nil` for any error at all, so
+// "nobody has created this venue" and "the database is unreachable" arrived at
+// the caller as the same answer. The seeder ACTS on that answer by building a
+// venue, and it also fed a zero uuid straight into an INSERT — which then failed
+// on a foreign key three calls later, a long way from the cause.
+func TestLookupsDistinguishMissingFromBroken(t *testing.T) {
+	s := newTestStore(t)
+	ctx := t.Context()
+
+	if _, err := s.FindVenueByName(ctx, "no such venue at all"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("missing venue: err = %v, want ErrNotFound — a nil error here means the "+
+			"caller cannot tell an empty catalog from a broken one", err)
+	}
+
+	v, err := s.CreateVenue(ctx, "Findable", "arena")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.FindVenueByName(ctx, "Findable")
+	if err != nil {
+		t.Fatalf("existing venue: unexpected error %v", err)
+	}
+	if got != v.ID {
+		t.Errorf("found %s, want %s", got, v.ID)
+	}
+
+	// A venue with no sections is the same shape of question.
+	if _, err := s.FirstSectionID(ctx, v.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("venue with no sections: err = %v, want ErrNotFound", err)
 	}
 }

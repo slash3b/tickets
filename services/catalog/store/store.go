@@ -14,6 +14,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -202,11 +203,25 @@ func (s *Store) MarkSeatsOpened(ctx context.Context, eventID uuid.UUID) error {
 	return nil
 }
 
+// ErrNotFound is returned when a lookup finds nothing, as opposed to failing.
+//
+// THE DIFFERENCE IS NOT COSMETIC. These functions used to return (uuid.Nil, nil)
+// for both cases, which meant "nobody has created the venue yet" and "the
+// database is unreachable" arrived at the caller identically. The seeder acts on
+// that answer by BUILDING A VENUE, so a database blip could have produced a
+// duplicate arena — and in the event that prompted this, a zero uuid went
+// straight into an INSERT and failed on the foreign key three calls later, a
+// long way from the cause.
+var ErrNotFound = errors.New("not found")
+
 func (s *Store) FindVenueByName(ctx context.Context, name string) (uuid.UUID, error) {
 	var id uuid.UUID
 	err := s.db.QueryRow(ctx, `SELECT id FROM catalog.venues WHERE name = $1 LIMIT 1`, name).Scan(&id)
-	if err != nil {
-		return uuid.Nil, nil
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return uuid.Nil, ErrNotFound
+	case err != nil:
+		return uuid.Nil, fmt.Errorf("find venue %q: %w", name, err)
 	}
 	return id, nil
 }
@@ -217,8 +232,11 @@ func (s *Store) FirstSectionID(ctx context.Context, venueID uuid.UUID) (uuid.UUI
 	err := s.db.QueryRow(ctx,
 		`SELECT id FROM catalog.sections WHERE venue_id = $1 ORDER BY display_order, name LIMIT 1`,
 		venueID).Scan(&id)
-	if err != nil {
-		return uuid.Nil, nil
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return uuid.Nil, ErrNotFound
+	case err != nil:
+		return uuid.Nil, fmt.Errorf("first section of %s: %w", venueID, err)
 	}
 	return id, nil
 }
