@@ -55,6 +55,12 @@ func TestSeedACinemaAndListIt(t *testing.T) {
 	if err := s.SetPrice(ctx, event.ID, sectionID, 1200); err != nil {
 		t.Fatal(err)
 	}
+	// AN EVENT IS ON SALE WHEN ITS SEATS ARE OPEN, not when its clock has passed.
+	// The workers loop does this in the cluster; on_sale_at above is already in
+	// the past, which is what makes it due.
+	if err := s.MarkSeatsOpened(ctx, event.ID); err != nil {
+		t.Fatal(err)
+	}
 
 	events, err := s.ListOnSale(ctx, 10)
 	if err != nil {
@@ -140,5 +146,69 @@ func TestLookupsDistinguishMissingFromBroken(t *testing.T) {
 	// A venue with no sections is the same shape of question.
 	if _, err := s.FirstSectionID(ctx, v.ID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("venue with no sections: err = %v, want ErrNotFound", err)
+	}
+}
+
+// TestOnSaleMeansSeatsAreOpen is the regression test for a window the storefront
+// used to lie through.
+//
+// on_sale_at is a TIME; the seats appear when the workers loop next ticks and
+// tells inventory to create them. ListOnSale used to filter on the clock, so for
+// up to one tick it advertised an event with no inventory whatsoever — measured
+// in the cluster at 15 seconds of available=0 on 2026-08-29. Every hold against
+// it fails, and to a customer that is indistinguishable from a sold-out show.
+//
+// The two listings must also stay complements. An event in the gap belongs in
+// upcoming; if both queries drifted back to the clock it would appear in neither
+// and disappear from the site entirely for a tick.
+func TestOnSaleMeansSeatsAreOpen(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	venue, err := s.CreateVenue(ctx, "Homelab Arena", "arena")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// on_sale_at an hour in the PAST, seats never opened: the moment has arrived
+	// and inventory has still never heard of this event.
+	event, err := s.CreateEvent(ctx, venue.ID, "Gap Show",
+		time.Now().Add(30*24*time.Hour), time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	onSale, err := s.ListOnSale(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(onSale) != 0 {
+		t.Errorf("on sale = %+v, want nothing — its seats do not exist yet", onSale)
+	}
+
+	upcoming, err := s.ListUpcoming(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(upcoming) != 1 {
+		t.Fatalf("upcoming = %+v, want the one event — it must not fall out of both lists", upcoming)
+	}
+
+	// The loop finds it, opens it, and only now is it purchasable.
+	due, err := s.ListDueForOnSale(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(due) != 1 {
+		t.Fatalf("due = %+v, want the one event", due)
+	}
+	if err := s.MarkSeatsOpened(ctx, event.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if onSale, err = s.ListOnSale(ctx, 10); err != nil || len(onSale) != 1 {
+		t.Fatalf("on sale = %+v (err %v), want the one event once its seats are open", onSale, err)
+	}
+	if upcoming, err = s.ListUpcoming(ctx, 10); err != nil || len(upcoming) != 0 {
+		t.Fatalf("upcoming = %+v (err %v), want nothing once it is on sale", upcoming, err)
 	}
 }

@@ -191,6 +191,12 @@ func seedShowing(t *testing.T, cat *catalogstore.Store, inv *inventorystore.Stor
 	if n != 50 {
 		t.Fatalf("opened %d seats, want 50", n)
 	}
+	// BOTH HALVES, because the workers loop does both. Opening the seats without
+	// marking the event is a state the cluster never reaches, and a fixture that
+	// stops halfway silently tests something that cannot happen.
+	if err := cat.MarkSeatsOpened(ctx, event.ID); err != nil {
+		t.Fatal(err)
+	}
 	return event.ID
 }
 

@@ -13,8 +13,16 @@
 # resetting the simulation while keeping the traces that explain the last run is
 # the common case.
 #
-# RUN IT ON THE CONTROL PLANE. It drives everything through kubectl exec:
-#   ssh slash3b@192.168.1.116 'bash -s' < scripts/wipe.sh --all --seed
+# RUN IT ON THE CONTROL PLANE. It drives everything through kubectl exec, so it
+# needs a shell that can reach the cluster, not a copy of the repo:
+#
+#   ssh slash3b@192.168.1.116 'bash -s -- --all --seed' < scripts/wipe.sh
+#
+# THE FLAGS GO INSIDE THE QUOTES, after `--`. Written the obvious way round —
+#   ssh host 'bash -s' < scripts/wipe.sh --all --seed
+# — the shell hands --all and --seed to ssh instead of to the script, ssh passes
+# them to bash as its own options, and bash answers "invalid option" with no hint
+# that the flags were ever meant for the script.
 #
 # Usage:
 #   wipe.sh --data          showings, seats, holds, orders, payments, venues,
@@ -43,7 +51,10 @@ for arg in "$@"; do
     --seed)      do_seed=true ;;
     --yes|-y)    assume_yes=true ;;
     --dry-run)   dry_run=true ;;
-    -h|--help)   sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    # Print the whole header comment rather than a hardcoded line range — the
+    # range was 2,25 and the header has since grown past it, which silently cut
+    # the usage block off the bottom of --help.
+    -h|--help)   awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$0"; exit 0 ;;
     *) echo "unknown flag: $arg (try --help)" >&2; exit 2 ;;
   esac
 done

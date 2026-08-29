@@ -119,12 +119,26 @@ func (s *Store) SetPrice(ctx context.Context, eventID, sectionID uuid.UUID, pric
 }
 
 // ListOnSale returns events currently purchasable, soonest first.
+//
+// PURCHASABLE MEANS THE SEATS ARE OPEN, NOT THAT THE CLOCK HAS PASSED. These are
+// not the same instant: on_sale_at is a time, and the workers loop notices it on
+// its next tick and asks inventory to create the seat rows. Between the two an
+// event whose moment has arrived has NO INVENTORY AT ALL.
+//
+// This used to filter on `on_sale_at <= now()`, so for up to one tick the
+// storefront advertised a show with zero buyable seats — measured at 15 seconds
+// on 2026-08-29, with the API reporting available=0 for two polls after the event
+// appeared. Every hold against it fails, and it looks like a sold-out show rather
+// than one that has not started.
+//
+// seats_opened_at is the same condition inventory itself enforces by simply not
+// having rows, so the listing and the seat claim now agree by construction.
 func (s *Store) ListOnSale(ctx context.Context, limit int) ([]*Event, error) {
 	rows, err := s.db.Query(ctx,
 		`SELECT e.id, e.venue_id, e.title, v.name, e.starts_at, e.on_sale_at
 		   FROM catalog.events e
 		   JOIN catalog.venues v ON v.id = e.venue_id
-		  WHERE e.on_sale_at <= now() AND e.starts_at > now()
+		  WHERE e.seats_opened_at IS NOT NULL AND e.starts_at > now()
 		  ORDER BY e.starts_at LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
@@ -156,10 +170,15 @@ func scanEvents(rows pgx.Rows) ([]*Event, error) {
 // they are not buyable — so the frontend needs a separate way to say
 // "on sale Friday at 10".
 func (s *Store) ListUpcoming(ctx context.Context, limit int) ([]*Event, error) {
+	//
+	// THE COMPLEMENT OF ListOnSale, and it has to stay that way. Both conditions
+	// are now seats_opened_at rather than the clock; if this one kept asking
+	// `on_sale_at > now()` an event in the gap between its moment and its seats
+	// would appear in NEITHER list and vanish from the site for a tick.
 	rows, err := s.db.Query(ctx,
 		`SELECT e.id, e.venue_id, e.title, v.name, e.starts_at, e.on_sale_at
 		   FROM catalog.events e JOIN catalog.venues v ON v.id = e.venue_id
-		  WHERE e.on_sale_at > now() AND e.starts_at > now()
+		  WHERE e.seats_opened_at IS NULL AND e.starts_at > now()
 		  ORDER BY e.on_sale_at LIMIT $1`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list upcoming: %w", err)

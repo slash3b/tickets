@@ -82,12 +82,16 @@ func TestNothingSellsBeforeOnSale(t *testing.T) {
 		t.Fatalf("held a seat before the sale opened")
 	}
 
-	// The on-sale itself: exactly what the workers loop does.
+	// The on-sale itself: exactly what the workers loop does, which is BOTH the
+	// inventory rows and the catalog flag that makes the event listable.
 	seatIDs := make([]uuid.UUID, len(seats))
 	for i, s := range seats {
 		seatIDs[i] = s.ID
 	}
 	if _, err := inv.OpenEvent(ctx, event.ID, seatIDs); err != nil {
+		t.Fatal(err)
+	}
+	if err := cat.MarkSeatsOpened(ctx, event.ID); err != nil {
 		t.Fatal(err)
 	}
 
