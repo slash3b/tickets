@@ -63,7 +63,11 @@ func NewServer(lg *zap.Logger) *grpc.Server {
 func Dial(target string) (*grpc.ClientConn, error) {
 	conn, err := grpc.NewClient(target,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+		// WRAPPED ON THIS SIDE TOO, and forgetting it the first time is instructive:
+		// a call produces a client span and a server span with the SAME NAME, so
+		// fixing only the server left half the Aborteds still counted as errors and
+		// the Services tab still red. Both ends decide their own span status.
+		grpc.WithStatsHandler(businessAware{otelgrpc.NewClientHandler()}),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:    30 * time.Second,
 			Timeout: 10 * time.Second,
