@@ -36,11 +36,6 @@ export default function Admin() {
   const [rows, setRows] = useState(50)
   const [perRow, setPerRow] = useState(40)
 
-  // Shown live so the size of what you are about to build is never a surprise.
-  const customSeats = Number(sections) * Number(rows) * Number(perRow)
-  const presetSeats = { arena: 20000, cinema: 96 }
-  const seatCount = venue === 'custom' ? customSeats : presetSeats[venue]
-
   useEffect(() => {
     ;(async () => {
       try {
@@ -175,7 +170,7 @@ export default function Admin() {
       }
       const s = await r.json()
       setStaged(s)
-      setMsg({ kind: 'ok', text: `${s.title} staged — ${s.seats} seats at ${s.venue}, on sale in ${onSaleIn}s` })
+      setMsg({ kind: 'ok', text: `${s.title} created — ${s.seats} seats at ${s.venue}, on sale in ${onSaleIn}s` })
 
       // Pick it up as soon as it is buyable, so Fire targets it without anyone
       // having to hunt for the id.
@@ -226,8 +221,11 @@ export default function Admin() {
           <label>
             venue
             <select value={venue} onChange={(e) => setVenue(e.target.value)}>
-              <option value="arena">Arena — 20,000 seats</option>
-              <option value="cinema">Cinema — 96 seats</option>
+              {/* No seat counts here either, for the reason on the button below:
+                  the gateway owns the preset sizes. Arena and Cinema already say
+                  which is the big one. */}
+              <option value="arena">Arena</option>
+              <option value="cinema">Cinema</option>
               <option value="custom">Custom…</option>
             </select>
           </label>
@@ -277,15 +275,20 @@ export default function Admin() {
           </>
         )}
 
+        {/* A STATIC LABEL, AND NO SEAT ARITHMETIC HERE.
+            The button used to compute its own label — "Stage a 20,000-seat
+            showing" — from a copy of the presets and the seat cap that the
+            gateway already owns (arenaLayout, cinemaLayout and maxSeats in
+            services/gateway/admin.go). Two copies of a number only stay equal
+            until one of them changes, and this copy would have gone on stating
+            the old size with complete confidence.
+            The server validates the layout and explains a rejection in words;
+            the line below reports the seats it actually built. */}
         <div className="controls">
-          <button className="action" onClick={stage}
-                  disabled={staging || !seatCount || seatCount > 60000}>
-            {staging ? 'staging…' : `Stage a ${seatCount.toLocaleString()}-seat showing`}
+          <button className="action" onClick={stage} disabled={staging}>
+            {staging ? 'creating…' : 'Create'}
           </button>
         </div>
-        {seatCount > 60000 && (
-          <p className="hint">That is {seatCount.toLocaleString()} seats. The limit is 60,000.</p>
-        )}
 
         {staged && (
           <p className="hint">
