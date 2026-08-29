@@ -1237,6 +1237,53 @@ MILESTONES
      way to catch that by reading the code. You have to make the system do the
      thing and then go look at what the telemetry said about it.
 
+  13 the operator runs the shows.                             DONE 2026-08-29
+     Nothing creates events on its own any more. The 03:00 seeder CronJob is
+     SUSPENDED, not deleted - one flag to reverse, and scripts/wipe.sh --seed
+     still reads the image out of its spec rather than carrying a second copy.
+
+     WHY: a sale you want to watch should start while you are looking at it. A
+     show that appeared overnight can only ever be studied after the fact.
+
+     THE VENUE IS CONFIGURABLE. arena and cinema remain as presets, plus custom
+     with sections, rows and seats per row. Caps exist because this endpoint has
+     no auth and one extra digit in `rows` is a request inventory would honestly
+     try to build: 40 sections, 500 rows, 100 per row, 60,000 seats total.
+
+     A CUSTOM LAYOUT WITH NO NAME IS NAMED AFTER ITS SHAPE - "Custom 2x5x6".
+     Venues are found by name and built only when missing, so a fixed default like
+     "Custom" would hand back the first chart forever and silently ignore the
+     numbers just typed. When an existing chart IS reused the response says so,
+     because building a show in the wrong size of room is a confusing hour.
+
+     THEN THE FLOW WAS TESTED END TO END AND THE STOREFRONT WAS LYING. Stage a
+     showing, watch it appear, and it advertised zero buyable seats for 15
+     seconds. on_sale_at is a TIME; the seats exist when the workers loop notices
+     that time and asks inventory to create the rows. ListOnSale filtered on the
+     clock, so between the two the event was listed with NO INVENTORY AT ALL -
+     every hold fails, and to a customer that is a sold-out show.
+
+     THE FIX IS THE THING THIS DOCUMENT ALREADY CLAIMED. "Opening the seats is the
+     on-sale" was true of inventory and not of catalog. Both listings now key off
+     seats_opened_at, and they are exact complements so an event in the gap is
+     upcoming rather than nowhere.
+
+     TWO FIXTURES CALLED OpenEvent WITHOUT MarkSeatsOpened - half of what the
+     workers loop does, and a state the cluster never reaches. A fixture that
+     stops halfway tests something that cannot happen, and it is why the window
+     survived a green suite.
+
+     THE WIPE COVERED TWO THIRDS OF THE STATE. Redis held seat maps for showings
+     the truncate had just deleted, and the bank keeps its charges in a map rather
+     than a table, so its idempotency keys survived every wipe - a replayed key
+     returned the OLD charge instead of making a new one. Venues are wiped too
+     now; the comment claiming the seeder needed them was wrong about the seeder,
+     which creates one when it is absent.
+
+     KAFKA IS DELIBERATELY NOT PURGED. Consumers use a unique group per process
+     starting at kafka.LastOffset, so nothing replays old messages into a fresh
+     projection, and the topics age out on their own retention.
+
 Milestone 1 is deliberately unglamorous. If the seat-claim primitive is wrong, every
 milestone after it is built on sand, and it is far cheaper to find that out with a
 goroutine test than with a simulator and seven deployments in the way.

@@ -690,6 +690,34 @@ OBSERVABILITY - SIGNOZ, INSTALLED 2026-08-24
   PUT IT BACK TO 0.05 AFTERWARDS. It is a live setting on a running system and
   nothing resets it for you.
 
+  SEEDER CRONJOB SUSPENDED 2026-08-29. `kubectl -n tickets get cronjob seeder`
+  shows SUSPEND=true. Nothing creates showings on its own any more; they are
+  staged from https://app.tickets.lan/admin. The CronJob is kept rather than
+  deleted because suspend is one flag to reverse and scripts/wipe.sh --seed reads
+  the seeder image out of its spec.
+
+  WIPING THE CLUSTER. scripts/wipe.sh is run FROM A WORKSTATION against the
+  control plane - it needs kubectl, not a copy of the repo on the node:
+
+    ssh slash3b@192.168.1.116 'bash -s -- --data --dry-run'   < scripts/wipe.sh
+    ssh slash3b@192.168.1.116 'bash -s -- --data --yes'       < scripts/wipe.sh
+    ssh slash3b@192.168.1.116 'bash -s -- --all --yes'        < scripts/wipe.sh
+    ssh slash3b@192.168.1.116 'bash -s -- --telemetry --yes'  < scripts/wipe.sh
+
+  THE FLAGS GO INSIDE THE QUOTES, AFTER `--`. Written the obvious way round,
+  `ssh host 'bash -s' < scripts/wipe.sh --all`, the shell gives --all to ssh
+  instead of the script and bash answers "invalid option" with no hint why. The
+  header of the script documented the broken form until 2026-08-29.
+
+  --data empties Postgres (venues included), flushes the Redis seat-map
+  projection, and restarts the bank, whose charges live in a map rather than a
+  table so the restart IS the wipe. --telemetry empties SigNoz. Kafka is not
+  purged and does not need to be: consumers start at kafka.LastOffset.
+
+  Verified 2026-08-29: 4 venues / 6 events / 608 seats / 73 orders / 8 Redis keys
+  -> all zero, then a cinema showing staged from the operator page opened 96 seats
+  and sold one.
+
   The seeder was worse. It passed nil as the log provider and never called
   obs.Setup at all, and its manifest had no OTLP endpoint, so the one job that
   decides whether there is anything to sell tomorrow reported nothing at all. A
