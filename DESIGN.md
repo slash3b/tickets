@@ -1325,6 +1325,49 @@ MILESTONES
 
      Verified: nine consecutive full runs at default parallelism, green.
 
+  15 the shop in daylight.                                    DONE 2026-08-29
+     Light theme. Same layout, same spacing, same components - what changed is
+     which end of the scale the page sits at.
+
+     THE SEAT MAP IS THE PART THAT DOES NOT JUST INVERT. `sold` was a dark grey
+     that read as "filled in"; on white the inert colour is the PALE one, so sold
+     is now the palest thing in the chart and available is the saturated one.
+     Keeping sold dark would have made a sold-out block the loudest object on the
+     page. `held` amber and `available` green also have to stay apart at 9px,
+     which is the size an arena block renders at.
+
+     ANIMATION IS ONE 120ms COLOUR TRANSITION, plus a prefers-reduced-motion rule
+     that removes even that. The hover lift went: it was decoration on a control
+     you click twenty times in a row.
+
+     THREE CONTROLS DID NOT DO WHAT THEY SAID.
+
+     THE COPY BUTTON DID NOTHING, SILENTLY. navigator.clipboard is undefined
+     outside a secure context and the gateway still has a plain :80 listener, so
+     on http://app.tickets.lan clicking your customer id was indistinguishable
+     from a copy that worked. Falls back to execCommand and now reports either
+     way.
+
+     THE BANK SLIDERS WERE WRITE-ONLY. They rendered the component's initial
+     state, so after a reload the page claimed a tame 5% while the bank might
+     have been declining everything - the exact situation you open that page to
+     find out about. GET /config was added and the page reads it. They also sent
+     a PUT per input event, roughly twenty real config changes per drag; they
+     commit once on release now.
+
+     AND THAT ENDPOINT IMMEDIATELY EARNED ITSELF. Reading the config back after a
+     write showed min_latency and max_latency at ZERO: setConfig decoded into an
+     empty struct and replaced everything, and the page sends only the two rates.
+     Every slider commit had been deleting the 20-300ms the fake bank exists to
+     simulate. NOTHING ERRORED - payments just quietly became instant, which is
+     the least realistic thing this service can do and the hardest to notice.
+     Partial updates now merge into the live config.
+
+     A WRITE-ONLY CONTROL CANNOT BE CHECKED, and that is the lesson rather than
+     the bug. The endpoint that made the page honest is the same endpoint that
+     made the bug visible; without a way to read the state back, both were
+     invisible for as long as anyone cared to look.
+
 Milestone 1 is deliberately unglamorous. If the seat-claim primitive is wrong, every
 milestone after it is built on sand, and it is far cheaper to find that out with a
 goroutine test than with a simulator and seven deployments in the way.
