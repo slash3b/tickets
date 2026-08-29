@@ -1083,9 +1083,25 @@ MILESTONES
      replicas, catalog, orders and payments to four, nothing restarted, and the
      sale completed. A waiting room is the answer when scaling stops working, and
      that has not happened yet.
-  10 three brokers, RF=3, min.insync.replicas=2. ISR shrink, leader election, and what
-     happens to producers when a broker dies mid-on-sale. Only worth doing once there is
-     disk headroom for it.
+  10 three brokers, RF=3, min.insync.replicas=2.                DONE 2026-08-29
+     The disk block is gone: cleaning up ClickHouse's own diagnostics took the
+     workers to 10G of 127G, so three 20Gi volumes are comfortable.
+
+     BOTH HALVES OF THE TOPICS NOW EXIST, which is what makes the hot partition
+     measurable rather than assertable. inventory.* has ONE partition and keys by
+     event_id, so an on-sale does not spread at all. orders.* and payments.* have
+     three and key by order_id, so they spread perfectly. Same cluster, same
+     on-sale, one set idle and one partition on fire.
+
+     FOUR THINGS BIT ON THE WAY, all recorded in infra/CLUSTER.md: an Argo
+     sync-wave deadlock, Strimzi refusing to change a topic's replication factor,
+     a deleted KafkaTopic CR leaving the Kafka topic behind to be re-adopted at
+     RF=1, and __consumer_offsets sitting at RF=1 because Strimzi does not manage
+     internal topics.
+
+     WHAT REMAINS IS THE EXPERIMENT ITSELF: kill a broker mid-on-sale and find out
+     whether producers carry on or start failing, and what the seat map does while
+     it happens. The cluster can now answer that; nothing has asked it yet.
 
 Milestone 1 is deliberately unglamorous. If the seat-claim primitive is wrong, every
 milestone after it is built on sand, and it is far cheaper to find that out with a

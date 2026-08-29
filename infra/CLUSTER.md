@@ -918,6 +918,38 @@ THE APPLICATION - DEPLOYED 2026-08-27
   547 MiB on disk. Ingestion unaffected: spans and logs still arriving. The three
   nodes now sit at 2%, 2% and 5%.
 
+  KAFKA WENT TO THREE BROKERS 2026-08-29, RF=3, min.insync.replicas=2. Four
+  things bit, and none of them are obvious:
+
+  1. THE SYNC DEADLOCKED ON ITS OWN WAVES. KafkaTopic resources had no sync-wave
+     annotation, so they defaulted to wave 0 - applied first and then waited on
+     for health, while the brokers they need sat in wave 4 behind them. Topics
+     could not go healthy because RF=3 wants three brokers; the brokers were never
+     applied because Argo was waiting for the topics. Topics are wave 5 now. The
+     dependency was always that way round; one broker at RF=1 never exposed it.
+
+  2. STRIMZI CANNOT CHANGE A TOPIC'S REPLICATION FACTOR. The operator says so:
+     "Replication factor change not supported". Topics created at RF=1 must be
+     deleted and recreated. There is no in-place path without Cruise Control.
+
+  3. DELETING THE KafkaTopic CR DOES NOT DELETE THE KAFKA TOPIC here. The topic
+     survived, and the recreated CR simply re-adopted it - still at RF=1, still
+     reporting NotSupported. The topic itself has to be deleted with
+     kafka-topics.sh --delete before the CR is recreated.
+
+  4. __consumer_offsets WAS LEFT AT RF=1 because Strimzi does not manage internal
+     topics. That is the one that matters most and is easiest to miss: losing a
+     broker would lose every consumer position, and the gateway would replay or
+     skip seat changes on restart. A cluster that looks replicated and is not.
+     Fixed by hand with kafka-reassign-partitions across all three brokers.
+
+  TOOL NAMES MOVED IN KAFKA 4.x. kafka.tools.GetOffsetShell is gone; the script is
+  bin/kafka-get-offsets.sh. The old invocation fails SILENTLY and reports zero
+  messages on topics that are working perfectly, which wastes an hour.
+
+  AND kubectl exec NEEDS -i TO PIPE A FILE IN. Without it the file lands empty and
+  the error you get back is about JSON parsing, a long way from the cause.
+
   REDIS IS NO LONGER INERT EITHER, as of 2026-08-29. It holds the seat-map
   projection, which is exactly the job DESIGN.md gave it and nothing more.
 
