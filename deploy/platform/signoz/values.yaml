@@ -59,7 +59,21 @@ clickhouse:
   # both are small. Everything else is removed at the config level, so it stops
   # being written rather than being cleaned up afterwards.
   files:
-    config.d/disable-system-logs.xml: |
+    # THE FILENAME IS LOad-BEARING AND MUST SORT LAST.
+    #
+    # config.d files are loaded in ALPHABETICAL order and later files override
+    # earlier ones. This was called disable-system-logs.xml, which sorts BEFORE
+    # the chart's own system_log.xml — so for every table that file declares, the
+    # chart quietly won and the removal did nothing at all.
+    #
+    # The evidence was unambiguous once looked at: system_log.xml declares exactly
+    # text_log, error_log, latency_log and query_metric_log, and those four were
+    # the only ones still being written. trace_log, which it does not declare,
+    # stopped the day the original fix landed. text_log had grown to 1.54 GiB —
+    # the largest table in the database — while appearing to be disabled.
+    #
+    # zz- so it sorts after anything the chart ships.
+    config.d/zz-disable-system-logs.xml: |
       <clickhouse>
         <trace_log remove="1"/>
         <zookeeper_log remove="1"/>
@@ -71,6 +85,20 @@ clickhouse:
         <asynchronous_metric_log remove="1"/>
         <session_log remove="1"/>
         <blob_storage_log remove="1"/>
+
+        <!-- Declared by the chart's system_log.xml, which is why they survived
+             the first attempt. -->
+        <error_log remove="1"/>
+        <latency_log remove="1"/>
+        <query_metric_log remove="1"/>
+
+        <!-- Newer tables the original list predates. aggregated_zookeeper_log
+             had 6.3 MILLION rows, which is a lot of bookkeeping about
+             bookkeeping for a single-replica ClickHouse. -->
+        <zookeeper_connection_log remove="1"/>
+        <backup_log remove="1"/>
+        <s3queue_log remove="1"/>
+        <asynchronous_insert_log remove="1"/>
       </clickhouse>
 
       <!-- NOTE: do NOT add <query_log><ttl>...</ttl></query_log> here. The chart
