@@ -19,6 +19,14 @@ metadata:
   namespace: data
   labels:
     strimzi.io/cluster: tickets-kafka
+  annotations:
+    # AFTER the Kafka cluster in wave 4. A topic cannot be healthy before the
+    # brokers it lives on exist, and with no wave annotation these defaulted to
+    # wave 0 — applied FIRST, then waited on for health, while the brokers they
+    # needed sat queued behind them in wave 4. That deadlocked the whole sync:
+    # topics unhealthy because RF=3 needs three brokers, brokers never applied
+    # because Argo was waiting for the topics.
+    argocd.argoproj.io/sync-wave: "5"
 spec:
   partitions: 1
   replicas: 3
@@ -33,6 +41,14 @@ metadata:
   namespace: data
   labels:
     strimzi.io/cluster: tickets-kafka
+  annotations:
+    # AFTER the Kafka cluster in wave 4. A topic cannot be healthy before the
+    # brokers it lives on exist, and with no wave annotation these defaulted to
+    # wave 0 — applied FIRST, then waited on for health, while the brokers they
+    # needed sat queued behind them in wave 4. That deadlocked the whole sync:
+    # topics unhealthy because RF=3 needs three brokers, brokers never applied
+    # because Argo was waiting for the topics.
+    argocd.argoproj.io/sync-wave: "5"
 spec:
   partitions: 1
   replicas: 3
@@ -47,6 +63,14 @@ metadata:
   namespace: data
   labels:
     strimzi.io/cluster: tickets-kafka
+  annotations:
+    # AFTER the Kafka cluster in wave 4. A topic cannot be healthy before the
+    # brokers it lives on exist, and with no wave annotation these defaulted to
+    # wave 0 — applied FIRST, then waited on for health, while the brokers they
+    # needed sat queued behind them in wave 4. That deadlocked the whole sync:
+    # topics unhealthy because RF=3 needs three brokers, brokers never applied
+    # because Argo was waiting for the topics.
+    argocd.argoproj.io/sync-wave: "5"
 spec:
   partitions: 1
   replicas: 3
@@ -70,6 +94,7 @@ metadata:
   name: orders.created
   namespace: data
   labels: {strimzi.io/cluster: tickets-kafka}
+  annotations: {argocd.argoproj.io/sync-wave: "5"}
 spec:
   partitions: 3
   replicas: 3
@@ -81,6 +106,7 @@ metadata:
   name: orders.confirmed
   namespace: data
   labels: {strimzi.io/cluster: tickets-kafka}
+  annotations: {argocd.argoproj.io/sync-wave: "5"}
 spec:
   partitions: 3
   replicas: 3
@@ -92,6 +118,7 @@ metadata:
   name: orders.failed
   namespace: data
   labels: {strimzi.io/cluster: tickets-kafka}
+  annotations: {argocd.argoproj.io/sync-wave: "5"}
 spec:
   partitions: 3
   replicas: 3
@@ -103,6 +130,7 @@ metadata:
   name: payments.succeeded
   namespace: data
   labels: {strimzi.io/cluster: tickets-kafka}
+  annotations: {argocd.argoproj.io/sync-wave: "5"}
 spec:
   partitions: 3
   replicas: 3
@@ -114,6 +142,7 @@ metadata:
   name: payments.failed
   namespace: data
   labels: {strimzi.io/cluster: tickets-kafka}
+  annotations: {argocd.argoproj.io/sync-wave: "5"}
 spec:
   partitions: 3
   replicas: 3
