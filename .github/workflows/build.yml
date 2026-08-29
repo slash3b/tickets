@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     # A real Postgres, so the store tests run here instead of skipping.
     # The oversell test is NOT run in CI — it carries a build tag and is triggered
-    # by hand with `go test -tags oversell ./services/inventory/...`. It fires a thousand concurrent goroutines at a
+    # by hand with `make oversell`. It fires a thousand concurrent goroutines at a
     # database; that belongs in a decision to run it, not in every push.
     services:
       postgres:

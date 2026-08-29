@@ -18,6 +18,16 @@
 #
 #   ssh slash3b@192.168.1.116 'bash -s -- --all --seed' < scripts/wipe.sh
 #
+# OR JUST USE THE MAKE TARGETS, which is what these notes recommend:
+#   make wipe-plan                     show what would happen, change nothing
+#   make wipe CONFIRM=WIPE             postgres, the redis projection, the bank
+#   make wipe-telemetry CONFIRM=WIPE   SigNoz only
+#   make wipe-all CONFIRM=WIPE         both
+#
+# --yes IS REQUIRED over ssh. The script arrives ON stdin, so the "type WIPE"
+# prompt below reads that same stdin, gets EOF and aborts. It fails closed, but it
+# cannot be answered — the guard lives in the makefile instead.
+#
 # THE FLAGS GO INSIDE THE QUOTES, after `--`. Written the obvious way round —
 #   ssh host 'bash -s' < scripts/wipe.sh --all --seed
 # — the shell hands --all and --seed to ssh instead of to the script, ssh passes

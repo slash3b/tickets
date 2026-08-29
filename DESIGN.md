@@ -796,9 +796,7 @@ MILESTONES
      exactly 10 wins, 7428 attempts/sec, zero errors, under -race. Overlapping
      three-seat groups hold too.
      THE OVERSELL TEST IS MANUAL - build tag `oversell`, so `go test ./...` does
-     not compile it and it cannot run by accident. Run it with
-     `go test -tags oversell ./services/inventory/...` (there is no Makefile in
-     this repo; the `make oversell` these notes used to name never existed).
+     not compile it and it cannot run by accident. `make oversell` runs it.
      SWEEPERS DONE 2026-08-27: expiry sweeper, hard-deadline sweeper, Convert, and
      a durable released_reason so "died of a slow bank" and "died of an abandoned
      checkout" stay distinguishable. The test that matters most passes - a hold in
@@ -1320,6 +1318,10 @@ MILESTONES
      reconciler both exist to process EVERYTHING unresolved; any test asserting on
      their totals has to own the table. Payments had already learned this and
      truncated; inventory had not.
+
+     `make test` DROPPED ITS -p 1. The target carried that flag with a comment
+     naming this exact bug and saying "the alternative is a database per package";
+     that alternative now exists, so the suite runs parallel again.
 
      Verified: nine consecutive full runs at default parallelism, green.
 

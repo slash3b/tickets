@@ -696,8 +696,14 @@ OBSERVABILITY - SIGNOZ, INSTALLED 2026-08-24
   deleted because suspend is one flag to reverse and scripts/wipe.sh --seed reads
   the seeder image out of its spec.
 
-  WIPING THE CLUSTER. scripts/wipe.sh is run FROM A WORKSTATION against the
-  control plane - it needs kubectl, not a copy of the repo on the node:
+  WIPING THE CLUSTER. Use the make targets, from a workstation with the repo:
+
+    make wipe-plan                     show what would happen, change nothing
+    make wipe CONFIRM=WIPE             postgres, the redis projection, the bank
+    make wipe-telemetry CONFIRM=WIPE   SigNoz traces, logs and metrics
+    make wipe-all CONFIRM=WIPE         both
+
+  What they run underneath, if you want it by hand:
 
     ssh slash3b@192.168.1.116 'bash -s -- --data --dry-run'   < scripts/wipe.sh
     ssh slash3b@192.168.1.116 'bash -s -- --data --yes'       < scripts/wipe.sh
@@ -708,6 +714,11 @@ OBSERVABILITY - SIGNOZ, INSTALLED 2026-08-24
   `ssh host 'bash -s' < scripts/wipe.sh --all`, the shell gives --all to ssh
   instead of the script and bash answers "invalid option" with no hint why. The
   header of the script documented the broken form until 2026-08-29.
+
+  --yes IS NOT OPTIONAL HERE, AND THAT IS NOT LAZINESS. The script is piped in as
+  stdin, so its "type WIPE" prompt reads that same stdin, gets EOF and aborts. It
+  fails closed, but it can never be answered. CONFIRM=WIPE on the make target is
+  the guard that actually works.
 
   --data empties Postgres (venues included), flushes the Redis seat-map
   projection, and restarts the bank, whose charges live in a map rather than a

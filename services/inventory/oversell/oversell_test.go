@@ -2,7 +2,7 @@
 
 // MANUALLY TRIGGERED ONLY — same rule as the store-level oversell test.
 //
-//	go test -tags oversell ./services/inventory/...
+//	make oversell
 //
 // THIS ONE GOES THROUGH gRPC. The original fires a thousand goroutines directly
 // at the store, which is where the guarantee actually lives and is the right

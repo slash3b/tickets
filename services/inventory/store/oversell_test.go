@@ -2,7 +2,7 @@
 
 // MANUALLY TRIGGERED ONLY.
 //
-//	go test -tags oversell ./services/inventory/...
+//	make oversell
 //	go test -tags oversell -run TestNo -v ./services/inventory/store/
 //
 // The build tag means `go test ./...` does not even COMPILE this file, so it can
