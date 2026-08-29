@@ -137,3 +137,60 @@ button.ghost { background: transparent; color: var(--muted); border: 1px solid v
 .rows.dense .row { gap: 2px; margin-bottom: 2px; }
 .rows.dense .rowlabel { font-size: 0.6rem; min-width: 1.6rem; }
 .rows.empty { color: #7d858f; font-size: 0.85rem; padding: 1rem 0; }
+
+/* The operator page. Visibly not the shop — a different accent and a banner, so
+   there is no chance of thinking you are on the customer side. */
+.admin h1 { color: #d98a3b; }
+.admin .sub a { color: #6e8bd6; }
+.warn-banner {
+  border: 1px solid #6b4a1e;
+  background: #241a0e;
+  color: #e0b070;
+  padding: 0.6rem 0.85rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  margin: 0 0 1.25rem;
+}
+.panel {
+  border: 1px solid #262b32;
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+  margin: 0 0 1.1rem;
+  background: #131619;
+}
+.panel h2 {
+  margin: 0 0 0.4rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #8b939d;
+}
+.hint { color: #7d858f; font-size: 0.82rem; margin: 0 0 0.8rem; line-height: 1.5; }
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+  align-items: flex-end;
+}
+.controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  color: #8b939d;
+}
+.controls input, .controls select {
+  background: #0e1114;
+  border: 1px solid #2a2f36;
+  color: #d6dae0;
+  border-radius: 6px;
+  padding: 0.4rem 0.55rem;
+  font: inherit;
+  font-size: 0.85rem;
+  min-width: 7rem;
+}
+.controls input[type="range"] { min-width: 11rem; padding: 0; }
+.action.danger { background: #7a2f2f; border-color: #933a3a; }
+.action.danger:disabled { opacity: 0.5; }
+.msg.standalone { display: block; margin-top: 0.8rem; }
+.msg.warn { color: #e0b070; }

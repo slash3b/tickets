@@ -102,3 +102,26 @@ spec:
           name: bank
           port: 80
           weight: 1
+---
+# Lets the tickets namespace route to the bank.
+#
+# Gateway API refuses cross-namespace backendRefs by default, and that default is
+# right: without it anyone could point a route at a service they do not own. The
+# grant is the bank's side of the handshake, which is why it lives here rather
+# than beside the route that needs it.
+#
+# Narrow on purpose: HTTPRoutes from `tickets` only, to Services only.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: tickets-to-bank
+  namespace: bank
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: tickets
+  to:
+    - group: ""
+      kind: Service
+      name: bank

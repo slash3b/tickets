@@ -97,6 +97,45 @@ spec:
   hostnames:
     - app.tickets.lan
   rules:
+    # THE OPERATOR ROUTES. These reach the load generator and the fake bank, which
+    # are not part of the customer path and are not otherwise exposed on this
+    # hostname. Both strip their prefix so the services see their own paths.
+    #
+    # The on-sale blocks until the last buyer finishes, so it needs the same long
+    # timeout the simulator's own hostname has.
+    - matches:
+        - path: {type: PathPrefix, value: /admin/sim}
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path: {type: ReplacePrefixMatch, replacePrefixMatch: /}
+      timeouts:
+        request: 900s
+        backendRequest: 900s
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: simulator
+          port: 80
+          weight: 1
+    - matches:
+        - path: {type: PathPrefix, value: /admin/bank}
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path: {type: ReplacePrefixMatch, replacePrefixMatch: /}
+      backendRefs:
+        # CROSS-NAMESPACE, so it needs the ReferenceGrant in deploy/apps/bank.
+        # Without one the route is Accepted but ResolvedRefs is False and every
+        # request 500s — Gateway API refuses cross-namespace refs by default, on
+        # purpose, so that one team cannot route at another's service uninvited.
+        - group: ""
+          kind: Service
+          name: bank
+          namespace: bank
+          port: 80
+          weight: 1
+
     # The seat-map stream is an SSE connection held open for as long as somebody
     # has the page open. Envoy's default route timeout is 15 SECONDS, which would
     # cut it every fifteen seconds forever — the same default that killed the
