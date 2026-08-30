@@ -681,6 +681,34 @@ OBSERVABILITY - SIGNOZ, INSTALLED 2026-08-24
     tickets.saga.step.duration   by step and outcome
     tickets.payments.reconciled
 
+  DASHBOARDS ARE IN GIT, infra/dashboards/. SigNoz keeps them in its own SQLite
+  at /var/lib/signoz/signoz.db inside signoz-0, nothing backs that up, and there
+  is no import API that works without a logged-in session — so the JSON lives in
+  the repo and importing is a browser job:
+    SigNoz UI -> Dashboards -> + New dashboard -> Import JSON.
+
+  go-runtime-v6.json (try first) and go-runtime-v5.json (fallback) are the same
+  eight panels in two schema versions, taken UNMODIFIED from
+  github.com/SigNoz/dashboards. They work here because pkg/obs runs the current
+  contrib/instrumentation/runtime, whose metric names are the current OTel
+  semantic conventions and match what the dashboard expects.
+
+  Verified 2026-08-30, all eight Go services reporting: goroutines from 11 (bank)
+  to 60 (gateway), go.memory.used split stack/other by the go.memory.type label,
+  around 10-18 MiB each.
+
+  ONE PANEL WILL BE EMPTY: Memory Limit (GOMEMLIMIT). The runtime package only
+  reports go.memory.limit when a limit is actually set, and nothing sets one, so
+  the Go GC does not know the container has a ceiling. That is the real finding
+  rather than a dashboard fault — Go targets a doubling heap and is blind to the
+  cgroup limit, which is how a Go process walks past a 256Mi container limit and
+  gets OOMKilled, as the gateway and simulator have here before.
+
+  MOST GO DASHBOARDS ON THE INTERNET WILL RENDER NOTHING, and it is not a fault
+  in the instrumentation: they query runtime.go.mem.heap_alloc and
+  process.runtime.go.*, the names the PREVIOUS generation of the runtime package
+  emitted. Check a template's metric names before concluding anything is broken.
+
   KAFKA METRICS, ADDED 2026-08-30 to feed https://signoz.tickets.lan/messaging-queues/kafka
   which was empty because nothing produced them. Strimzi has no metricsConfig, so
   there is no JMX exporter, and no collector was scraping the brokers.
