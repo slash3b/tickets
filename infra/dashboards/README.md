@@ -8,9 +8,41 @@ signoz-0 pod; nothing else backs that up, and the PVC is 2Gi of homelab disk.
 HOW TO IMPORT
   SigNoz UI -> Dashboards -> + New dashboard -> Import JSON -> paste the file.
 
+  Start with go-runtime-all-services-v6.json. It needs nothing set after import.
+  If that schema is rejected, use the -v5 file of the same name.
+
 There is no API route for this that does not need a logged-in session, so it is a
 browser job. The endpoints exist (/api/v1/dashboards) but answer 401 to anything
 without a cookie.
+
+
+IF EVERY PANEL IS BLANK, IT IS THE VARIABLE
+------------------------------------------
+
+The upstream dashboards put a `service.name` dropdown at the top and every panel
+filters on it:
+
+    filter: service.name IN $service.name
+
+with allowAllValue: false and allowMultiple: false — so there is NO "All" option
+and nothing is selected on import. Until you pick a service from that dropdown,
+every panel is correctly empty. That is the first thing to check, and it looks
+exactly like broken instrumentation.
+
+go-runtime-all-services-*.json are the same eight panels with that variable
+REMOVED and `group by service.name` added instead, so all eight Go services draw
+as their own line with no dropdown to set. For this system that is the more useful
+version anyway: the question here is usually "which service is behaving
+differently", which a single-select dropdown actively prevents you from asking.
+
+They are derived from the upstream files by a transformation recorded in the
+commit, not hand-edited, so regenerating them after an upstream change is
+mechanical.
+
+  service.name is a RESOURCE attribute (fieldContext "resource"), not a metric
+  one. go.memory.type is a metric attribute (fieldContext "attribute"). Getting
+  those two backwards yields a panel that renders nothing with no error, which is
+  the same failure mode as the variable and just as quiet.
 
 
 go-runtime-v6.json / go-runtime-v5.json
