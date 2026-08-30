@@ -681,6 +681,42 @@ OBSERVABILITY - SIGNOZ, INSTALLED 2026-08-24
     tickets.saga.step.duration   by step and outcome
     tickets.payments.reconciled
 
+  PROFILE-GUIDED OPTIMISATION, since 2026-08-30. Every service binary except
+  workers is compiled against services/<name>/cmd/default.pgo, a CPU profile of
+  this system under a real on-sale.
+
+  REFRESH THEM with:
+    ssh slash3b@192.168.1.116 'bash -s' < scripts/pgo.sh
+  then copy /tmp/pgo/*.pgo over services/<name>/cmd/default.pgo and commit.
+
+  CHECK THE SAMPLE TOTALS BEFORE TRUSTING A PROFILE. The first collection here
+  ran against a sold-out event and produced 197-byte files — sixty seconds of
+  sampling an idle process. That builds cleanly and optimises the idle path,
+  which is the one thing PGO must not be pointed at. A good run looks like:
+
+    catalog 20.46s of samples in 60s, gateway 14.50s, inventory 4.97s
+
+  The script stages a 20,000-seat arena first for exactly this reason.
+
+  workers ships no profile deliberately: it is a ticker and samples at ~10ms in a
+  minute. An absent default.pgo is a clean no-op.
+
+  PPROF IS ON LOOPBACK ONLY, 127.0.0.1:6060 inside each pod, which is why
+  collection goes through port-forward:
+    kubectl -n tickets port-forward deploy/gateway 6060:6060
+  It is not on any Service and must not be. /debug/pprof/heap dumps live memory
+  and /debug/pprof/profile pins a core; nothing here authenticates and the
+  gateway's HTTP port is routed to a public hostname.
+
+  VERIFY IT IS ACTUALLY APPLIED, because PGO that stops applying looks exactly
+  like PGO that was never there:
+    go version -m <binary> | grep pgo     ->  build -pgo=default.pgo
+
+  NOTE ON THE DEPLOY TAG FOR THIS CHANGE: images were built from commit 994339b,
+  which was then rewritten to d738b0f by an ill-advised amend after pushing. The
+  trees are identical so the images are right, but that tag does not resolve to a
+  commit on main. Do not amend a commit that CI has already started building.
+
   DASHBOARDS ARE IN GIT, infra/dashboards/. SigNoz keeps them in its own SQLite
   at /var/lib/signoz/signoz.db inside signoz-0, nothing backs that up, and there
   is no import API that works without a logged-in session — so the JSON lives in
