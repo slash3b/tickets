@@ -32,6 +32,18 @@ import (
 // The applied value is visible in SigNoz as go.memory.limit: the runtime
 // instrumentation only reports that metric when a limit actually exists, which is
 // why the Memory Limit panel of the Go Runtime dashboard was empty until now.
+//
+// VPA IS THE REASON THIS READS THE CGROUP AND NOT A MANIFEST. Measured the day
+// this landed: the manifests say 384Mi for catalog, gateway and inventory and
+// 192Mi for orders, and the RUNNING PODS had 400Mi and 300Mi — the autoscaler had
+// moved every one of them. A GOMEMLIMIT written next to the manifest limit would
+// have been wrong for six of eight services within a day, and wrong quietly.
+//
+// KNOWN GAP: this is read ONCE at startup, and the VPA here runs in
+// InPlaceOrRecreate mode, so it can resize a live container without restarting
+// it. When it raises a limit we are merely conservative; when it LOWERS one, this
+// value is stale and too high until the pod next restarts. Re-reading on a timer
+// would close that.
 
 // headroom is the fraction of the cgroup limit handed to Go.
 //

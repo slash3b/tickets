@@ -697,12 +697,39 @@ OBSERVABILITY - SIGNOZ, INSTALLED 2026-08-24
   to 60 (gateway), go.memory.used split stack/other by the go.memory.type label,
   around 10-18 MiB each.
 
-  ONE PANEL WILL BE EMPTY: Memory Limit (GOMEMLIMIT). The runtime package only
-  reports go.memory.limit when a limit is actually set, and nothing sets one, so
-  the Go GC does not know the container has a ceiling. That is the real finding
-  rather than a dashboard fault — Go targets a doubling heap and is blind to the
-  cgroup limit, which is how a Go process walks past a 256Mi container limit and
-  gets OOMKilled, as the gateway and simulator have here before.
+  GOMEMLIMIT IS SET FROM THE CGROUP, since 2026-08-30 — pkg/obs/memlimit.go reads
+  the container's own memory limit at startup and gives Go 90% of it. Before that
+  the Go GC had no idea the container had a ceiling: GOGC=100 targets twice the
+  live heap, a ratio with no absolute number in it, which is how the gateway and
+  simulator were OOMKilled when limits sized for a cinema met an arena.
+
+  VPA IS WHY IT READS THE CGROUP RATHER THAN AN ENV VAR. Measured on the day:
+
+    service     manifest   ACTUAL pod limit   GOMEMLIMIT applied
+    catalog     384Mi      400Mi              360 MiB
+    gateway     384Mi      400Mi              360 MiB
+    inventory   384Mi      400Mi              360 MiB
+    orders      192Mi      300Mi              270 MiB
+    payments    168Mi      300Mi              270 MiB
+    workers     128Mi      266Mi              240 MiB
+    simulator   256Mi      256Mi              230 MiB
+    bank         64Mi       64Mi               58 MiB
+
+  Six of eight had been moved by the autoscaler. A GOMEMLIMIT hardcoded beside the
+  manifest limit would have been wrong for those six within a day, and wrong
+  silently.
+
+  KNOWN GAP: it is read ONCE at startup and this VPA runs InPlaceOrRecreate, so it
+  can shrink a live container without restarting it. A lowered limit leaves the
+  value stale and too high until the pod restarts. Re-reading on a timer closes it;
+  not done yet.
+
+  Verify with:  go.memory.limit in SigNoz, or the Memory Limit panel of the Go
+  Runtime dashboard, which was empty until this existed.
+
+  THE OLD NOTE, NOW HISTORY: Memory Limit (GOMEMLIMIT). That panel was empty until the
+  change above, because the runtime only reports go.memory.limit when a limit
+  actually exists. It has data now.
 
   MOST GO DASHBOARDS ON THE INTERNET WILL RENDER NOTHING, and it is not a fault
   in the instrumentation: they query runtime.go.mem.heap_alloc and
