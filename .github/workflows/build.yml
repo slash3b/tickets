@@ -54,7 +54,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-        with: {go-version: '1.25', cache: true}
+        with: {go-version: '1.27', cache: true}
       # Five files had drifted out of gofmt and nothing noticed, because vet does
       # not check formatting. Cheap to gate, annoying to clean up in bulk later.
       #

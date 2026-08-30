@@ -11,7 +11,7 @@
 
 # BUILDPLATFORM, not TARGETPLATFORM: the compiler runs natively and cross-compiles,
 # which is far faster than emulating the target under QEMU. Go makes this free.
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine@sha256:1ae0735f00daffa3aaf1363a5184c0d2dc55c78e3db4ec70241cdac97bf84b59 AS build
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine@sha256:4c9fe60190a2a3350ddc51de80d0224b8a6698d12bdfc999fee45ea9d6c46dbc AS build
 
 WORKDIR /src
 
