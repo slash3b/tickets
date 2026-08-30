@@ -1368,6 +1368,56 @@ MILESTONES
      made the bug visible; without a way to read the state back, both were
      invisible for as long as anyone cared to look.
 
+  16 profile-guided optimisation.                            DONE 2026-08-30
+     Every service binary is now compiled against a CPU profile taken from this
+     system doing the thing it exists to do.
+
+     PGO IS ONLY AS GOOD AS THE PROFILE, and the first attempt proved it: profiles
+     collected against a sold-out event came back at 197 BYTES for payments and
+     workers. Sixty seconds of sampling an idle process. Feeding that to the
+     compiler would have optimised the idle path — the one thing PGO must never be
+     pointed at. The fix was to stage a 20,000-seat arena first, so there was
+     something to sell.
+
+     THE PROFILE THAT SHIPPED: 3,000 buyers over 40 seconds, 543 bought, 2,416
+     lost the race, 0 errors. Contention, which is what this system is for.
+
+       catalog    20.46s of samples in 60s   34% CPU
+       gateway    14.50s                     24%
+       simulator  14.06s                     23%
+       inventory   4.97s                      8%
+       orders      3.06s                      5%
+       payments    1.28s                      2%
+       bank        0.37s                    0.6%
+       workers     0.01s                  0.017%   <- NOT SHIPPED
+
+     WORKERS HAS NO PROFILE ON PURPOSE. It is a ticker; ten milliseconds of
+     samples in a minute is noise, and a profile that thin does not describe a
+     workload. PGO fed noise optimises noise. An absent default.pgo is a clean
+     no-op, which is the honest outcome.
+
+     COLLECTION NEEDED pprof, WHICH DID NOT EXIST HERE. It is now served on
+     127.0.0.1:6060 inside each pod and nowhere else. That is the whole security
+     model: /debug/pprof/heap dumps live memory and /debug/pprof/profile pins a
+     core, nothing in this cluster authenticates, and the gateway's HTTP port is
+     routed to a public hostname — pprof on the shared probe mux would have
+     published heap dumps of a running ticket shop. kubectl port-forward still
+     reaches loopback because it attaches to the pod's own network namespace.
+
+     THE HANDLERS ARE WIRED EXPLICITLY rather than by importing net/http/pprof for
+     its side effect. That import registers on http.DefaultServeMux at init, and a
+     server that ever falls back to the default mux would then serve pprof
+     wherever it happens to listen.
+
+     VERIFIED IN THE SHIPPED ARTEFACT, not just locally: the gateway image built
+     from this Dockerfile records `build -pgo=default.pgo` in its build info.
+     -pgo=auto has been the default since Go 1.21 and is written out in the
+     Dockerfile anyway, because PGO that silently stops applying is
+     indistinguishable from never having applied.
+
+     REFRESH THEM with scripts/pgo.sh when the shape of the work changes. Stale
+     profiles do not break a build, they just gradually stop describing it.
+
 Milestone 1 is deliberately unglamorous. If the seat-claim primitive is wrong, every
 milestone after it is built on sand, and it is far cheaper to find that out with a
 goroutine test than with a simulator and seven deployments in the way.
