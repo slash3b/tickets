@@ -1,5 +1,5 @@
 HOMELAB KUBERNETES - STATE OF THE CLUSTER
-Snapshot 2026-08-29, taken from k8s-ctrl-plane (192.168.1.116).
+Snapshot 2026-08-30, taken from k8s-ctrl-plane (192.168.1.116).
 Changes made 2026-08-23/24: cineplex removed, slash3b account added, Argo CD 3.0.6 -> 3.5.1.
 2026-08-24: CLEAN SLATE. All observability leftovers deleted - 2 PVCs, 13 CRDs, 4 empty
 namespaces, 3 helm repos, stale images on every node. Disk 83/50/43% -> 47/29/16%, ~30G
@@ -695,14 +695,39 @@ OBSERVABILITY - SIGNOZ, INSTALLED 2026-08-24
   kafka.partition.oldest_offset, kafka.partition.replicas,
   kafka.partition.replicas_in_sync. About 80 series, and stable.
 
-  THE `consumers` SCRAPER IS OFF ON PURPOSE. Consumer lag is meaningless in this
-  system: pkg/events uses a unique group per process (broadcast, not work queue),
-  every reader starts at kafka.LastOffset so a healthy consumer's lag is ~0 by
-  construction, and every pod restart abandons a group whose lag then grows
-  forever, measuring how long ago that pod died. Measured before switching it off:
-  29 groups, 72 lag series, from one day of rolling deploys. SigNoz's Consumer Lag
-  panel is therefore empty; the partition and topic panels are the ones that
-  answer the hot-partition question and they work.
+  THE `consumers` SCRAPER IS ON, AND THE REASON IT WAS BRIEFLY OFF IS FIXED AT THE
+  SOURCE. pkg/events uses a unique group per process (broadcast, not work queue),
+  so EVERY POD RESTART ABANDONS A GROUP. At Kafka's 7-day default offsets
+  retention they piled up: 29 dead groups and 72 lag series after one day of
+  rolling deploys, each scraped every minute, each reporting a lag that only grew
+  because nobody was reading.
+
+  deploy/data/kafka.yaml now sets offsets.retention.minutes: 60. A dead group is
+  gone within the hour; a live one keeps committing and stays. MEASURED: 32 groups
+  before, 1 after. Cardinality is bounded by RUNNING consumers, which is what it
+  should always have been. Turning the scraper off was treating the symptom.
+
+  Note it is a read-only broker config, so changing it ROLLS ALL THREE BROKERS.
+  Confirm with:
+    kubectl -n data exec tickets-kafka-dual-role-0 -c kafka -- \
+      bin/kafka-configs.sh --bootstrap-server localhost:9092 \
+      --entity-type brokers --entity-name 0 --describe --all | grep offsets.retention
+
+  WHAT THE LAG MEANS HERE: every reader starts at kafka.LastOffset, so a healthy
+  consumer sits at ~0 by construction rather than by merit. A RISING number is
+  real; a zero proves less than it looks.
+
+  kafka.consumer.fetch_latency_avg IS HAND-ROLLED, in pkg/events/metrics.go.
+  Everywhere else it comes from a JVM consumer's JMX MBean, and every consumer
+  here is Go on segmentio/kafka-go, which has no JMX and never will. It is the
+  same measurement taken by the client: kafka-go's ReaderStats.WaitTime, the fetch
+  round trip.
+
+  NOT ReadTime, WHICH IS THE LOCAL DECODE OF A BATCH THAT ALREADY ARRIVED. That
+  was the first choice and reported 0.01ms — ten microseconds for a network call
+  is the number telling you it measures the wrong thing. An idle consumer shows
+  ~250ms because a fetch with no data blocks until MaxWait; the JMX metric behaves
+  the same way, so that is faithful rather than broken.
 
   MESSAGING SPANS, SAME DATE. Publishes and consumes now emit producer and
   consumer spans with the messaging semantic conventions, and W3C trace context
