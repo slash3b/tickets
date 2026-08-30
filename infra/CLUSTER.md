@@ -5,6 +5,12 @@ Changes made 2026-08-23/24: cineplex removed, slash3b account added, Argo CD 3.0
 namespaces, 3 helm repos, stale images on every node. Disk 83/50/43% -> 47/29/16%, ~30G
 free cluster-wide. Worker host keys verified out-of-band and key auth fixed. See CLEANUP,
 DISK and ACCESS. No change to anything that was actually running.
+2026-08-30: file re-verified against the live cluster after drifting. NODES, NAMESPACES,
+the PVC section and the Argo CD app list were all written before the application landed
+and were wrong. Three findings worth reading: the control plane is NO LONGER TAINTED and
+now runs more pods than either worker; Postgres and all three Kafka brokers are pinned by
+local-path volumes to k8s-node-1, making it a single point of failure for the whole data
+plane; the platform is 15 Argo Applications, not 4.
 2026-08-27: control-plane DNS fixed at the root, not patched again. resolv.conf now
 points at the systemd-resolved STUB, which makes tailscaled pick its resolvedManager
 and stop wanting the file; resolv-guard.path restores the symlink if anything takes it
@@ -107,21 +113,39 @@ Cluster-internal only (ClusterIP - reach with kubectl port-forward):
   Example: kubectl -n argocd port-forward svc/argocd-server 8080:80
            then http://localhost:8080
 
-No application workloads are running. cineplex was removed on 2026-08-23 (see TEARDOWN below).
+The tickets application IS running - namespace tickets, nine workloads, all Synced and
+Healthy under Argo CD. cineplex, the earlier project, was removed on 2026-08-23 (see
+TEARDOWN below); the line here used to say nothing was running and was left behind when
+the app landed.
 
 
 NODES - 3 KVM VMs (QEMU i440FX), Debian 13 trixie, kernel 6.12.101
 ------------------------------------------------------------------
 
-  k8s-ctrl-plane   192.168.1.116   control-plane   6 CPU   7.7Gi RAM
-                   tainted node-role.kubernetes.io/control-plane
-                   WARNING: / is 84% full (12G of 15G)
-  k8s-node-1       192.168.1.88    worker          4 CPU   7.6Gi RAM
-                   carries every non-kubeadm pod today
-  k8s-node-2       192.168.1.24    worker          4 CPU   5.7Gi RAM
-                   only flannel + kube-proxy, effectively idle
+Re-read off the live cluster 2026-08-30. Everything below had been stale since the
+2026-08-24 resize: this section still carried the pre-resize RAM and the 15G disks, still
+said the control plane was tainted, and still said node-2 was idle. None of those were
+true. Kubelet v1.36.4 on all three.
 
-Cluster age 426 days (built ~2025-06-23). All three Ready, no disk or memory pressure.
+  k8s-ctrl-plane   192.168.1.116   control-plane   6 CPU   11.9Gi RAM   40G disk, 58% used
+                   NOT TAINTED. The node-role.kubernetes.io/control-plane taint is gone,
+                   and this node now carries MORE pods than either worker - 32 against 19
+                   and 15. That is the single most surprising line in this file: the
+                   control plane is a general-purpose worker that also happens to run
+                   etcd and the apiserver. Anything scheduled without a nodeSelector can
+                   land on top of the thing the cluster cannot survive losing.
+  k8s-node-1       192.168.1.88    worker          4 CPU   13.8Gi RAM   118G disk, 9% used
+  k8s-node-2       192.168.1.24    worker          4 CPU   13.8Gi RAM   118G disk, 10% used
+                   No longer idle - it carries 15 pods.
+
+Pod placement 2026-08-30: 32 ctrl-plane / 19 node-1 / 15 node-2.
+
+RAM figures are kubelet capacity, which is a little under what Proxmox allocates the
+guest (12500M / 14500M / 14500M - see VIRTUALIZATION). The disks are the post-resize
+ones; the workers went 15G -> 120G on 2026-08-24 and have room to spare, while the
+control plane at 40G is the tight one at 58%.
+
+Cluster age 433 days (built 2025-06-23). All three Ready, no disk or memory pressure.
 
 
 CLUSTER BUILD
@@ -144,12 +168,18 @@ CLUSTER BUILD
 NAMESPACES
 ----------
 
-  argocd, cert-manager, default, ingress-nginx, kube-flannel, kube-node-lease,
-  kube-public, kube-system, local-path-storage, metallb-system
+  Live list 2026-08-30, 17 namespaces:
+
+  argocd, bank, cert-manager, cnpg-system, data, default, envoy-gateway-system,
+  kube-flannel, kube-node-lease, kube-public, kube-system, local-path-storage,
+  metallb-system, signoz, strimzi-system, tickets, vpa
+
+  ingress-nginx IS GONE. The list here used to name it; the edge is Envoy Gateway
+  (envoy-gateway-system) now, not ingress-nginx.
 
   Every namespace here holds something. kubernetes-dashboard, logging, monitoring and
-  tracing were deleted 2026-08-24 - see CLEANUP. The observability namespaces will come
-  back when the new stack is installed, created by Argo CD rather than by hand.
+  tracing were deleted 2026-08-24 - see CLEANUP. The observability namespaces came back
+  as signoz, created by Argo CD rather than by hand, which is what was intended.
 
 
 WHAT IS ACTUALLY RUNNING - AND WHY EACH PIECE IS THERE
@@ -248,22 +278,61 @@ Storage
   Delete reclaim policy, WaitForFirstConsumer, no volume expansion.
   Node-local disk, so a PVC pins its pod to one node.
 
-  There are now ZERO PersistentVolumeClaims and ZERO PersistentVolumes in the cluster.
-  The two orphans (monitoring/storage-tempo-0 bound 5Gi, logging/storage-loki-stack-0
-  pending 377 days) were deleted 2026-08-24 - see CLEANUP. The next PVC created will be
-  the first real one.
+  SEVEN PVCs, all Bound, all local-path. Re-read 2026-08-30; this section used to say
+  zero, which was true only in the gap between the 2026-08-24 cleanup and the data plane
+  landing.
+
+    data     tickets-pg-1                       20Gi   node-1
+    data     data-0-tickets-kafka-dual-role-0   20Gi   node-1
+    data     data-0-tickets-kafka-dual-role-1   20Gi   node-1
+    data     data-0-tickets-kafka-dual-role-2   20Gi   node-1
+    signoz   clickhouse-cluster-0-0-0           40Gi   node-2
+    signoz   data-signoz-zookeeper-0             8Gi   node-2
+    signoz   signoz-db-signoz-0                  2Gi   ctrl-plane
+
+  EVERY PIECE OF THE DATA PLANE IS ON ONE NODE. Postgres and all three Kafka brokers
+  hold local-path volumes on k8s-node-1, so they are pinned there permanently and
+  k8s-node-1 is a single point of failure for the entire application - losing it loses
+  the database and the whole Kafka quorum at once. Three Kafka replicas on one node is
+  replication that buys nothing; it survives a broker crash and not a node one. This is
+  a consequence of local-path being the only StorageClass, not a scheduling mistake, and
+  it does not get fixed by moving pods around. It gets fixed by storage that is not
+  node-local.
+
+  The two 2026-08-24 orphans (monitoring/storage-tempo-0 bound 5Gi,
+  logging/storage-loki-stack-0 pending 377 days) were deleted - see CLEANUP.
 
 
 GITOPS - APP OF APPS, LIVE SINCE 2026-08-24
 -------------------------------------------
 
   Argo CD manages the platform from git@github.com:slash3b/tickets.git (PUBLIC repo, so
-  no credentials are configured). Applications:
+  no credentials are configured).
 
-    root                 deploy/argocd/apps        the app of apps
-    metallb              chart + $values           wave 0
-    platform-manifests   deploy/manifests          wave 1
-    ingress-nginx        chart + $values           wave 2
+  FIFTEEN Applications, all Synced and Healthy, verified 2026-08-30. This list used to
+  name four and end at ingress-nginx; it was never updated as the platform grew. Waves
+  are the sync-wave annotations in deploy/argocd/apps, and they are what makes a
+  from-scratch rebuild work in one pass - operators land before the CRs they must admit.
+
+    wave  app                  source                                what it is
+
+     -    root                 deploy/argocd/apps                    the app of apps
+     0    metallb              chart 0.16.1 + $values                LoadBalancer IPs
+     1    platform-manifests   deploy/manifests                      issuers, MetalLB pool
+     1    cnpg-operator        chart 0.29.0                          runs Postgres
+     1    strimzi-operator     chart 1.2.0                           runs Kafka
+     1    metrics-server       chart 3.13.0                          kubectl top, HPA source
+     1    vpa                  chart 5.0.0                           vertical pod autoscaler
+     2    envoy-gateway        chart v1.5.4 + $values                the edge; replaced
+                                                                     ingress-nginx
+     3    gateway              deploy/gateway                        Gateway + HTTPRoutes
+     4    data                 deploy/data                           pg cluster, Kafka, topics
+     4    redis                deploy/redis                          seat-map cache
+     4    bank                 deploy/apps/bank                      fake payment processor
+     5    signoz               chart 0.138.0 + $values               traces, metrics, logs
+     5    tickets              deploy/apps/tickets                   the nine workloads
+     6    k8s-infra            chart 0.17.0                          SigNoz host/cluster
+                                                                     collectors
 
   ONLY ONE THING IS APPLIED BY HAND, ever:
     kubectl apply -f deploy/argocd/root.yaml
