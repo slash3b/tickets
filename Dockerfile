@@ -48,10 +48,16 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     test -d "services/${SERVICE}/cmd" || { echo "services/${SERVICE}/cmd does not exist" >&2; exit 1; }; \
     CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" \
     go build \
+      -pgo=auto \
       -trimpath \
       -buildvcs=false \
       -ldflags="-s -w -X main.version=${VERSION}" \
       -o /out/app "./services/${SERVICE}/cmd"
+#   -pgo=auto    uses services/<name>/cmd/default.pgo when that file exists, and
+#                is a no-op when it does not. This IS the default since Go 1.21,
+#                and it is spelled out anyway: profile-guided optimisation that
+#                silently stops applying looks exactly like nothing at all, and a
+#                GOFLAGS or toolchain change could turn it off without a trace.
 #   -trimpath    strips absolute build paths, so the binary does not embed
 #                /home/runner/... and two builds of the same source match.
 #   -buildvcs=false  .git is excluded by .dockerignore; without this Go errors
