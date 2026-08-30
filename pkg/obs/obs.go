@@ -47,6 +47,11 @@ type Shutdown func(context.Context) error
 // The returned LoggerProvider is nil when no endpoint is configured; pass it to
 // logger.MustNew, which then logs to stdout only.
 func Setup(ctx context.Context, service, version, endpoint string) (Shutdown, otellog.LoggerProvider, error) {
+	// Before anything else: teach the GC that the container has a ceiling. See
+	// memlimit.go — it costs nothing when there is no cgroup limit to read, and
+	// the value it applies is what makes go.memory.limit appear in SigNoz.
+	applyMemoryLimit()
+
 	// Propagators are set even with no exporter: they cost nothing and mean an
 	// incoming traceparent header is still honoured.
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
