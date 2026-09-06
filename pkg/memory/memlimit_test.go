@@ -1,4 +1,4 @@
-package obs
+package memory
 
 import (
 	"os"
@@ -12,18 +12,16 @@ import (
 // the GC thrash forever on a process that was perfectly healthy.
 func TestCgroupLimit(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		files   map[string]string
-		want    int64
-		wantOK  bool
-		wantSrc string
+		name   string
+		files  map[string]string
+		want   int64
+		wantOK bool
 	}{
 		{
-			name:    "cgroup v2 with a real limit",
-			files:   map[string]string{"memory.max": "402653184\n"}, // 384Mi
-			want:    402653184,
-			wantOK:  true,
-			wantSrc: "cgroup v2 memory.max",
+			name:   "cgroup v2 with a real limit",
+			files:  map[string]string{"memory.max": "402653184\n"}, // 384Mi
+			want:   402653184,
+			wantOK: true,
 		},
 		{
 			name:   "cgroup v2 unlimited says max",
@@ -31,11 +29,10 @@ func TestCgroupLimit(t *testing.T) {
 			wantOK: false,
 		},
 		{
-			name:    "falls back to cgroup v1",
-			files:   map[string]string{"memory/memory.limit_in_bytes": "201326592\n"}, // 192Mi
-			want:    201326592,
-			wantOK:  true,
-			wantSrc: "cgroup v1 memory.limit_in_bytes",
+			name:   "falls back to cgroup v1",
+			files:  map[string]string{"memory/memory.limit_in_bytes": "201326592\n"}, // 192Mi
+			want:   201326592,
+			wantOK: true,
 		},
 		{
 			// cgroup v1 has no "max" sentinel — unlimited is this absurd number.
@@ -67,18 +64,15 @@ func TestCgroupLimit(t *testing.T) {
 				}
 			}
 
-			got, src, ok := cgroupLimit(root)
+			got, ok := cgroupLimit(root)
 			if ok != tc.wantOK {
-				t.Fatalf("ok = %v, want %v (got %d from %q)", ok, tc.wantOK, got, src)
+				t.Fatalf("ok = %v, want %v (got %d)", ok, tc.wantOK, got)
 			}
 			if !tc.wantOK {
 				return
 			}
 			if got != tc.want {
 				t.Errorf("limit = %d, want %d", got, tc.want)
-			}
-			if src != tc.wantSrc {
-				t.Errorf("source = %q, want %q", src, tc.wantSrc)
 			}
 		})
 	}

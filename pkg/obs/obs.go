@@ -21,6 +21,9 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/slash3b/tickets/pkg/memory"
+	"github.com/slash3b/tickets/pkg/profiling"
+
 	otelruntime "go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
@@ -33,8 +36,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
-
-	"github.com/slash3b/tickets/pkg/profiling"
 )
 
 // Shutdown flushes and stops every provider. Call it, or the last batch of spans
@@ -54,9 +55,9 @@ func Setup(ctx context.Context, service, version, endpoint string) (Shutdown, ot
 	profiling.Serve()
 
 	// Before anything else: teach the GC that the container has a ceiling. See
-	// memlimit.go — it costs nothing when there is no cgroup limit to read, and
+	// pkg/memory — it costs nothing when there is no cgroup limit to read, and
 	// the value it applies is what makes go.memory.limit appear in SigNoz.
-	applyMemoryLimit()
+	memory.ApplyLimit()
 
 	// Propagators are set even with no exporter: they cost nothing and mean an
 	// incoming traceparent header is still honoured.

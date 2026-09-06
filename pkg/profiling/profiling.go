@@ -59,5 +59,6 @@ func Serve() {
 		// write timeout would cut every profile short at the default.
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+
 	go func() { _ = srv.Serve(lis) }()
 }

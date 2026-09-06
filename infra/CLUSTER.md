@@ -802,7 +802,7 @@ OBSERVABILITY - SIGNOZ, INSTALLED 2026-08-24
   to 60 (gateway), go.memory.used split stack/other by the go.memory.type label,
   around 10-18 MiB each.
 
-  GOMEMLIMIT IS SET FROM THE CGROUP, since 2026-08-30 — pkg/obs/memlimit.go reads
+  GOMEMLIMIT IS SET FROM THE CGROUP, since 2026-08-30 — pkg/memory/memlimit.go reads
   the container's own memory limit at startup and gives Go 90% of it. Before that
   the Go GC had no idea the container had a ceiling: GOGC=100 targets twice the
   live heap, a ratio with no absolute number in it, which is how the gateway and

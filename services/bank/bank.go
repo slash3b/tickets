@@ -24,44 +24,6 @@ import (
 	"go.uber.org/zap"
 )
 
-type Status string
-
-const (
-	StatusAuthorized Status = "authorized"
-	StatusDeclined   Status = "declined"
-)
-
-type Charge struct {
-	ID             string    `json:"id"`
-	IdempotencyKey string    `json:"idempotency_key"`
-	AmountMinor    int64     `json:"amount_minor"`
-	Status         Status    `json:"status"`
-	DeclineCode    string    `json:"decline_code,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-}
-
-// Config is the chaos dial. Defaults are tame enough to develop against; turn
-// them savage for an afternoon deliberately.
-type Config struct {
-	MinLatency  time.Duration `json:"min_latency"`
-	MaxLatency  time.Duration `json:"max_latency"`
-	DeclineRate float64       `json:"decline_rate"` // 0..1
-	// TimeoutRate is the fraction of requests that SUCCEED SERVER-SIDE and then
-	// never reply. Not "fail" — succeed, silently. This is the whole point.
-	TimeoutRate float64 `json:"timeout_rate"`
-	// Outage refuses everything, for watching backpressure.
-	Outage bool `json:"outage"`
-}
-
-func DefaultConfig() Config {
-	return Config{
-		MinLatency:  20 * time.Millisecond,
-		MaxLatency:  300 * time.Millisecond,
-		DeclineRate: 0.05,
-		TimeoutRate: 0.01,
-	}
-}
-
 type Bank struct {
 	mu sync.Mutex
 	// byKey is what makes this bank behave like a real one: a repeated
@@ -123,11 +85,6 @@ func (b *Bank) ChargeCount() int {
 	return len(b.byKey)
 }
 
-type authorizeRequest struct {
-	IdempotencyKey string `json:"idempotency_key"`
-	AmountMinor    int64  `json:"amount_minor"`
-}
-
 // Handler returns the bank's HTTP surface.
 func (b *Bank) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -138,10 +95,12 @@ func (b *Bank) Handler() http.Handler {
 	if lg == nil {
 		lg = zap.NewNop()
 	}
+
 	obs.Route(mux, lg, "POST /authorize", b.authorize)
+	mux.HandleFunc("GET /charges/{key}", b.lookup)
+
 	mux.HandleFunc("PUT /config", b.setConfig)
 	mux.HandleFunc("GET /config", b.getConfig)
-	mux.HandleFunc("GET /charges/{key}", b.lookup)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
