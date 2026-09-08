@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -47,7 +48,13 @@ var ErrHoldReleased = errors.New("hold was already released; seats are gone")
 const (
 	serializationFailure = "40001"
 	deadlockDetected     = "40P01"
+	uniqueViolation      = "23505"
 )
+
+// idempotencyIndex is the partial unique index in schema.sql. Named here because
+// a duplicate key on THAT index means "another request already used this key" and
+// is recoverable by re-reading, while a duplicate on any other index is a bug.
+const idempotencyIndex = "holds_idempotency_key_idx"
 
 // maxRetries bounds the deadlock retry loop. Deadlocks here are a normal outcome
 // of contention, not a fault: one of the two transactions is chosen as victim and
@@ -58,11 +65,24 @@ type Store struct{ db *pgxpool.Pool }
 
 func New(db *pgxpool.Pool) *Store { return &Store{db: db} }
 
-// Hold claims seats for ttl. It returns the hold id, or ErrSeatsUnavailable if
-// any seat was taken — in which case nothing is claimed.
-func (s *Store) Hold(ctx context.Context, eventID uuid.UUID, seatIDs []uuid.UUID, ttl time.Duration) (uuid.UUID, error) {
+// Hold claims seats for ttl. It returns the hold id and the moment the short TTL
+// runs out, or ErrSeatsUnavailable if any seat was taken — in which case nothing
+// is claimed.
+//
+// idempotencyKey MAY BE EMPTY, and everything below behaves exactly as it did
+// before when it is. When it is not, the key is stored with the hold and a later
+// call carrying the same key returns THAT hold instead of claiming again.
+//
+// WHAT THAT PREVENTS is not a double booking — the claim statement already makes
+// that impossible — but something quieter and worse for the person at the seat
+// map. Without a key, a retry after a lost response finds the seats already held
+// BY THE CALLER ITSELF, and the only thing the store can say is
+// ErrSeatsUnavailable. The caller is told it lost a race it actually won, its
+// hold id is gone, and the seats it paid the contention cost to win sit locked
+// until the sweeper expires them with nobody able to buy them.
+func (s *Store) Hold(ctx context.Context, eventID uuid.UUID, seatIDs []uuid.UUID, ttl time.Duration, idempotencyKey string) (uuid.UUID, time.Time, error) {
 	if len(seatIDs) == 0 {
-		return uuid.Nil, errors.New("no seats requested")
+		return uuid.Nil, time.Time{}, errors.New("no seats requested")
 	}
 
 	// SORT BEFORE LOCKING. Postgres takes row locks in whatever order it scans,
@@ -85,15 +105,62 @@ func (s *Store) Hold(ctx context.Context, eventID uuid.UUID, seatIDs []uuid.UUID
 
 	var lastErr error
 	for attempt := range maxRetries {
-		id, err := s.holdOnce(ctx, eventID, seats, ttl)
+		// THE REPLAY CHECK, INSIDE THE LOOP RATHER THAN BEFORE IT, because it does
+		// two jobs. It is the fast path for an ordinary retry, and it is also how
+		// the race below resolves: when two requests carry the same key the loser's
+		// insert fails on the unique index, and the next pass through here finds
+		// the winner's committed row and returns it.
+		if idempotencyKey != "" {
+			id, expires, state, found, err := s.holdByKey(ctx, idempotencyKey)
+			if err != nil {
+				span.RecordError(err)
+				span.SetStatus(codes.Error, "idempotency lookup failed")
+				return uuid.Nil, time.Time{}, err
+			}
+			if found {
+				// A KEY NAMES ONE HOLD, FOR GOOD. If that hold has already ended
+				// there is nothing left to replay, and claiming fresh seats under
+				// the same key would quietly turn it into a request id — the caller
+				// would end up with two holds it believes are one. ErrSeatsUnavailable
+				// is the honest answer and the one the caller already knows how to
+				// handle: refetch the map and choose again.
+				if state == "released" || state == "consumed" {
+					span.SetAttributes(attribute.String("hold.outcome", "replay_expired"))
+					holds.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "replay_expired")))
+					return uuid.Nil, time.Time{}, ErrSeatsUnavailable
+				}
+				// NOT counted as "won". A replay claimed nothing, and folding it
+				// into the win rate would overstate how many seats an on-sale
+				// actually moved.
+				span.SetAttributes(
+					attribute.Int("hold.attempts", attempt+1),
+					attribute.String("hold.outcome", "replayed"),
+				)
+				holds.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "replayed")))
+				return id, expires, nil
+			}
+		}
+
+		id, expires, err := s.holdOnce(ctx, eventID, seats, ttl, idempotencyKey)
 		if err == nil {
 			span.SetAttributes(
 				attribute.Int("hold.attempts", attempt+1),
 				attribute.String("hold.outcome", "won"),
 			)
 			holds.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "won")))
-			return id, nil
+			return id, expires, nil
 		}
+
+		// LOST THE KEY, NOT THE SEATS. A concurrent request carrying the same key
+		// committed first. Postgres blocks the second inserter on the index until
+		// the first transaction resolves, so by the time 23505 comes back the
+		// winner is committed and the replay check above will find it — loop
+		// immediately, with no backoff, because there is nothing to wait for.
+		if isDuplicateKey(err) {
+			lastErr = err
+			continue
+		}
+
 		if errors.Is(err, ErrSeatsUnavailable) || !isRetryable(err) {
 			// LOSING A RACE IS NOT AN ERROR. It is the expected outcome for most
 			// callers on a contended seat, so the span is not marked failed and
@@ -110,7 +177,7 @@ func (s *Store) Hold(ctx context.Context, eventID uuid.UUID, seatIDs []uuid.UUID
 				attribute.String("hold.outcome", outcome),
 			)
 			holds.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", outcome)))
-			return uuid.Nil, err
+			return uuid.Nil, time.Time{}, err
 		}
 
 		// A retryable failure is a real deadlock or serialization failure. Counted
@@ -122,7 +189,7 @@ func (s *Store) Hold(ctx context.Context, eventID uuid.UUID, seatIDs []uuid.UUID
 		// not retry in lockstep and deadlock again.
 		select {
 		case <-ctx.Done():
-			return uuid.Nil, ctx.Err()
+			return uuid.Nil, time.Time{}, ctx.Err()
 		case <-time.After(time.Duration(attempt+1) * 2 * time.Millisecond):
 		}
 	}
@@ -133,25 +200,60 @@ func (s *Store) Hold(ctx context.Context, eventID uuid.UUID, seatIDs []uuid.UUID
 	)
 	span.SetStatus(codes.Error, "retries exhausted")
 	holds.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "exhausted")))
-	return uuid.Nil, fmt.Errorf("hold failed after %d attempts: %w", maxRetries, lastErr)
+	return uuid.Nil, time.Time{}, fmt.Errorf("hold failed after %d attempts: %w", maxRetries, lastErr)
 }
 
-func (s *Store) holdOnce(ctx context.Context, eventID uuid.UUID, seats []uuid.UUID, ttl time.Duration) (uuid.UUID, error) {
+// holdByKey finds the hold a previous request created under this key.
+//
+// It reads state as well as the id because a key that names a hold which has
+// since been released or consumed is NOT a replayable request — see the caller.
+func (s *Store) holdByKey(ctx context.Context, key string) (uuid.UUID, time.Time, string, bool, error) {
+	var (
+		id      uuid.UUID
+		expires time.Time
+		state   string
+	)
+	err := s.db.QueryRow(ctx,
+		`SELECT id, expires_at, state FROM inventory.holds WHERE idempotency_key = $1`,
+		key).Scan(&id, &expires, &state)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, time.Time{}, "", false, nil
+	}
+	if err != nil {
+		return uuid.Nil, time.Time{}, "", false, fmt.Errorf("idempotency lookup: %w", err)
+	}
+	return id, expires, state, true, nil
+}
+
+func (s *Store) holdOnce(ctx context.Context, eventID uuid.UUID, seats []uuid.UUID, ttl time.Duration, idempotencyKey string) (uuid.UUID, time.Time, error) {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, time.Time{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }() // no-op once committed
 
 	holdID := uuid.New()
 	now := time.Now()
+	expiresAt := now.Add(ttl)
 
-	if _, err := tx.Exec(ctx,
-		`INSERT INTO inventory.holds (id, event_id, state, expires_at, hard_deadline)
-		 VALUES ($1, $2, 'active', $3, $4)`,
-		holdID, eventID, now.Add(ttl), now.Add(15*time.Minute),
-	); err != nil {
-		return uuid.Nil, fmt.Errorf("insert hold: %w", err)
+	// NULLIF, AND IT IS LOAD-BEARING. The unique index covers rows WHERE
+	// idempotency_key IS NOT NULL, and an empty string is not null — storing ''
+	// for every keyless hold would let exactly ONE of them exist and fail every
+	// other hold in the system with a duplicate key.
+	//
+	// RETURNING expires_at, rather than reporting the Go value computed above.
+	// timestamptz keeps MICROSECONDS and time.Time keeps nanoseconds, so the two
+	// disagree in the last three digits — and a replay, which reads the column
+	// back, would then report a different instant than the original call did for
+	// the same hold. Taking the stored value in both paths makes them identical
+	// by construction instead of nearly identical.
+	if err := tx.QueryRow(ctx,
+		`INSERT INTO inventory.holds (id, event_id, state, expires_at, hard_deadline, idempotency_key)
+		 VALUES ($1, $2, 'active', $3, $4, NULLIF($5, ''))
+		 RETURNING expires_at`,
+		holdID, eventID, expiresAt, now.Add(15*time.Minute), idempotencyKey,
+	).Scan(&expiresAt); err != nil {
+		return uuid.Nil, time.Time{}, fmt.Errorf("insert hold: %w", err)
 	}
 
 	// THE CLAIM. One statement, and the reason the whole design works.
@@ -168,12 +270,12 @@ func (s *Store) holdOnce(ctx context.Context, eventID uuid.UUID, seats []uuid.UU
 		holdID, eventID, seats,
 	)
 	if err != nil {
-		return uuid.Nil, fmt.Errorf("claim seats: %w", err)
+		return uuid.Nil, time.Time{}, fmt.Errorf("claim seats: %w", err)
 	}
 
 	if tag.RowsAffected() != int64(len(seats)) {
 		// All-or-nothing. Rolling back also removes the hold row we just inserted.
-		return uuid.Nil, ErrSeatsUnavailable
+		return uuid.Nil, time.Time{}, ErrSeatsUnavailable
 	}
 
 	if _, err := tx.Exec(ctx,
@@ -181,14 +283,14 @@ func (s *Store) holdOnce(ctx context.Context, eventID uuid.UUID, seats []uuid.UU
 		 SELECT $1, $2, unnest($3::uuid[])`,
 		holdID, eventID, seats,
 	); err != nil {
-		return uuid.Nil, fmt.Errorf("record hold seats: %w", err)
+		return uuid.Nil, time.Time{}, fmt.Errorf("record hold seats: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return uuid.Nil, fmt.Errorf("commit: %w", err)
+		return uuid.Nil, time.Time{}, fmt.Errorf("commit: %w", err)
 	}
 
-	return holdID, nil
+	return holdID, expiresAt, nil
 }
 
 // OpenEvent makes seats available for sale.
@@ -413,6 +515,17 @@ func (s *Store) CheckInvariants(ctx context.Context, eventID uuid.UUID) error {
 	}
 
 	return errors.Join(problems...)
+}
+
+// isDuplicateKey reports whether err is another request having already used this
+// idempotency key. Scoped to the one index by name: a duplicate anywhere else in
+// this table is a genuine bug and must not be swallowed as a replay.
+func isDuplicateKey(err error) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return false
+	}
+	return pgErr.Code == uniqueViolation && pgErr.ConstraintName == idempotencyIndex
 }
 
 func isRetryable(err error) bool {

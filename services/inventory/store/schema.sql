@@ -35,6 +35,28 @@ CREATE TABLE IF NOT EXISTS inventory.holds (
 CREATE INDEX IF NOT EXISTS holds_sweep_idx
     ON inventory.holds (state, expires_at);
 
+-- THE IDEMPOTENCY KEY, so a retried hold returns the original instead of
+-- claiming seats twice.
+--
+-- ADDED AFTER THE TABLE EXISTED, which pkg/migrate says it cannot do — it only
+-- applies CREATE ... IF NOT EXISTS and has no versions. ADD COLUMN IF NOT EXISTS
+-- is the one alteration that is genuinely idempotent and order-independent, so it
+-- is safe under that scheme. Anything that CHANGES an existing column still is
+-- not, and still needs a real migration tool first.
+ALTER TABLE inventory.holds ADD COLUMN IF NOT EXISTS idempotency_key text;
+
+-- PARTIAL, because the key is optional and most holds will not carry one. A
+-- plain UNIQUE would also work — Postgres treats NULLs as distinct — but it would
+-- index every keyless row for nothing, on a table the sweeper already scans on a
+-- ticker.
+--
+-- THIS CONSTRAINT IS THE WHOLE MECHANISM. Two concurrent requests carrying the
+-- same key cannot both insert; the loser gets 23505 and re-reads the winner's
+-- hold. Enforcing it in the database rather than by a check-then-insert in Go is
+-- what makes it true under concurrency instead of usually true.
+CREATE UNIQUE INDEX IF NOT EXISTS holds_idempotency_key_idx
+    ON inventory.holds (idempotency_key) WHERE idempotency_key IS NOT NULL;
+
 -- The contended row. One per sellable seat per event.
 --
 -- status is the ONLY thing that decides whether a seat can be sold, and it has

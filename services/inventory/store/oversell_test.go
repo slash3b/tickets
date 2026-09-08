@@ -57,7 +57,7 @@ func TestNoOversellUnderContention(t *testing.T) {
 
 			<-start // release them all at once — a staggered start proves nothing
 
-			switch _, err := s.Hold(ctx, event, seat, time.Minute); {
+			switch _, _, err := s.Hold(ctx, event, seat, time.Minute, ""); {
 			case err == nil:
 				won.Add(1)
 			case errors.Is(err, ErrSeatsUnavailable):
@@ -145,7 +145,7 @@ func TestNoOversellWithOverlappingMultiSeat(t *testing.T) {
 
 			<-start
 
-			switch _, err := s.Hold(ctx, event, group, time.Minute); {
+			switch _, _, err := s.Hold(ctx, event, group, time.Minute, ""); {
 			case err == nil:
 				won.Add(1)
 			case errors.Is(err, ErrSeatsUnavailable):

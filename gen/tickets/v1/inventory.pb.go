@@ -10,6 +10,7 @@ import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	durationpb "google.golang.org/protobuf/types/known/durationpb"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -23,12 +24,25 @@ const (
 )
 
 type HoldRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	EventId       string                 `protobuf:"bytes,1,opt,name=event_id,json=eventId,proto3" json:"event_id,omitempty"`
-	SeatIds       []string               `protobuf:"bytes,2,rep,name=seat_ids,json=seatIds,proto3" json:"seat_ids,omitempty"`
-	Ttl           *durationpb.Duration   `protobuf:"bytes,3,opt,name=ttl,proto3" json:"ttl,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	EventId string                 `protobuf:"bytes,1,opt,name=event_id,json=eventId,proto3" json:"event_id,omitempty"`
+	SeatIds []string               `protobuf:"bytes,2,rep,name=seat_ids,json=seatIds,proto3" json:"seat_ids,omitempty"`
+	Ttl     *durationpb.Duration   `protobuf:"bytes,3,opt,name=ttl,proto3" json:"ttl,omitempty"`
+	// OPTIONAL. A stable key supplied by the caller so that a RETRY of this exact
+	// request returns the ORIGINAL hold instead of claiming a second set of seats.
+	//
+	// Without it a retried hold is the worst kind of failure available here: the
+	// first attempt succeeded and its response was lost, so the retry finds the
+	// seats already held — by the caller itself — and comes back ABORTED. The
+	// caller is told it lost a race it actually won, and the hold id is gone, so
+	// the seats sit locked until the TTL expires with nobody able to buy them.
+	//
+	// Derive it from something stable about the ATTEMPT, never from a clock or a
+	// fresh random value per try: a key that changes on retry is not a key. The
+	// gateway passes through the client's Idempotency-Key header verbatim.
+	IdempotencyKey string `protobuf:"bytes,4,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *HoldRequest) Reset() {
@@ -82,9 +96,21 @@ func (x *HoldRequest) GetTtl() *durationpb.Duration {
 	return nil
 }
 
+func (x *HoldRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
 type HoldResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	HoldId        string                 `protobuf:"bytes,1,opt,name=hold_id,json=holdId,proto3" json:"hold_id,omitempty"`
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	HoldId string                 `protobuf:"bytes,1,opt,name=hold_id,json=holdId,proto3" json:"hold_id,omitempty"`
+	// When the short TTL runs out. Returned rather than computed by the caller
+	// because a REPLAYED hold expires when the ORIGINAL one does — a retry
+	// arriving 30s later does not get 30 more seconds, and a caller adding the
+	// TTL to its own clock would quietly believe it did.
+	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -124,6 +150,13 @@ func (x *HoldResponse) GetHoldId() string {
 		return x.HoldId
 	}
 	return ""
+}
+
+func (x *HoldResponse) GetExpiresAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return nil
 }
 
 type ReleaseRequest struct {
@@ -662,13 +695,16 @@ var File_tickets_v1_inventory_proto protoreflect.FileDescriptor
 const file_tickets_v1_inventory_proto_rawDesc = "" +
 	"\n" +
 	"\x1atickets/v1/inventory.proto\x12\n" +
-	"tickets.v1\x1a\x1egoogle/protobuf/duration.proto\"p\n" +
+	"tickets.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x99\x01\n" +
 	"\vHoldRequest\x12\x19\n" +
 	"\bevent_id\x18\x01 \x01(\tR\aeventId\x12\x19\n" +
 	"\bseat_ids\x18\x02 \x03(\tR\aseatIds\x12+\n" +
-	"\x03ttl\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\x03ttl\"'\n" +
+	"\x03ttl\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\x03ttl\x12'\n" +
+	"\x0fidempotency_key\x18\x04 \x01(\tR\x0eidempotencyKey\"b\n" +
 	"\fHoldResponse\x12\x17\n" +
-	"\ahold_id\x18\x01 \x01(\tR\x06holdId\"A\n" +
+	"\ahold_id\x18\x01 \x01(\tR\x06holdId\x129\n" +
+	"\n" +
+	"expires_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"A\n" +
 	"\x0eReleaseRequest\x12\x17\n" +
 	"\ahold_id\x18\x01 \x01(\tR\x06holdId\x12\x16\n" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\"\x11\n" +
@@ -722,45 +758,47 @@ func file_tickets_v1_inventory_proto_rawDescGZIP() []byte {
 
 var file_tickets_v1_inventory_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_tickets_v1_inventory_proto_goTypes = []any{
-	(*HoldRequest)(nil),          // 0: tickets.v1.HoldRequest
-	(*HoldResponse)(nil),         // 1: tickets.v1.HoldResponse
-	(*ReleaseRequest)(nil),       // 2: tickets.v1.ReleaseRequest
-	(*ReleaseResponse)(nil),      // 3: tickets.v1.ReleaseResponse
-	(*ConvertRequest)(nil),       // 4: tickets.v1.ConvertRequest
-	(*ConvertResponse)(nil),      // 5: tickets.v1.ConvertResponse
-	(*CommitRequest)(nil),        // 6: tickets.v1.CommitRequest
-	(*CommitResponse)(nil),       // 7: tickets.v1.CommitResponse
-	(*OpenEventRequest)(nil),     // 8: tickets.v1.OpenEventRequest
-	(*OpenEventResponse)(nil),    // 9: tickets.v1.OpenEventResponse
-	(*SeatStatusesRequest)(nil),  // 10: tickets.v1.SeatStatusesRequest
-	(*SeatStatusesResponse)(nil), // 11: tickets.v1.SeatStatusesResponse
-	(*SweepRequest)(nil),         // 12: tickets.v1.SweepRequest
-	(*SweepResponse)(nil),        // 13: tickets.v1.SweepResponse
-	nil,                          // 14: tickets.v1.SeatStatusesResponse.StatusesEntry
-	(*durationpb.Duration)(nil),  // 15: google.protobuf.Duration
+	(*HoldRequest)(nil),           // 0: tickets.v1.HoldRequest
+	(*HoldResponse)(nil),          // 1: tickets.v1.HoldResponse
+	(*ReleaseRequest)(nil),        // 2: tickets.v1.ReleaseRequest
+	(*ReleaseResponse)(nil),       // 3: tickets.v1.ReleaseResponse
+	(*ConvertRequest)(nil),        // 4: tickets.v1.ConvertRequest
+	(*ConvertResponse)(nil),       // 5: tickets.v1.ConvertResponse
+	(*CommitRequest)(nil),         // 6: tickets.v1.CommitRequest
+	(*CommitResponse)(nil),        // 7: tickets.v1.CommitResponse
+	(*OpenEventRequest)(nil),      // 8: tickets.v1.OpenEventRequest
+	(*OpenEventResponse)(nil),     // 9: tickets.v1.OpenEventResponse
+	(*SeatStatusesRequest)(nil),   // 10: tickets.v1.SeatStatusesRequest
+	(*SeatStatusesResponse)(nil),  // 11: tickets.v1.SeatStatusesResponse
+	(*SweepRequest)(nil),          // 12: tickets.v1.SweepRequest
+	(*SweepResponse)(nil),         // 13: tickets.v1.SweepResponse
+	nil,                           // 14: tickets.v1.SeatStatusesResponse.StatusesEntry
+	(*durationpb.Duration)(nil),   // 15: google.protobuf.Duration
+	(*timestamppb.Timestamp)(nil), // 16: google.protobuf.Timestamp
 }
 var file_tickets_v1_inventory_proto_depIdxs = []int32{
 	15, // 0: tickets.v1.HoldRequest.ttl:type_name -> google.protobuf.Duration
-	14, // 1: tickets.v1.SeatStatusesResponse.statuses:type_name -> tickets.v1.SeatStatusesResponse.StatusesEntry
-	0,  // 2: tickets.v1.InventoryService.Hold:input_type -> tickets.v1.HoldRequest
-	2,  // 3: tickets.v1.InventoryService.Release:input_type -> tickets.v1.ReleaseRequest
-	4,  // 4: tickets.v1.InventoryService.Convert:input_type -> tickets.v1.ConvertRequest
-	6,  // 5: tickets.v1.InventoryService.Commit:input_type -> tickets.v1.CommitRequest
-	8,  // 6: tickets.v1.InventoryService.OpenEvent:input_type -> tickets.v1.OpenEventRequest
-	10, // 7: tickets.v1.InventoryService.SeatStatuses:input_type -> tickets.v1.SeatStatusesRequest
-	12, // 8: tickets.v1.InventoryService.Sweep:input_type -> tickets.v1.SweepRequest
-	1,  // 9: tickets.v1.InventoryService.Hold:output_type -> tickets.v1.HoldResponse
-	3,  // 10: tickets.v1.InventoryService.Release:output_type -> tickets.v1.ReleaseResponse
-	5,  // 11: tickets.v1.InventoryService.Convert:output_type -> tickets.v1.ConvertResponse
-	7,  // 12: tickets.v1.InventoryService.Commit:output_type -> tickets.v1.CommitResponse
-	9,  // 13: tickets.v1.InventoryService.OpenEvent:output_type -> tickets.v1.OpenEventResponse
-	11, // 14: tickets.v1.InventoryService.SeatStatuses:output_type -> tickets.v1.SeatStatusesResponse
-	13, // 15: tickets.v1.InventoryService.Sweep:output_type -> tickets.v1.SweepResponse
-	9,  // [9:16] is the sub-list for method output_type
-	2,  // [2:9] is the sub-list for method input_type
-	2,  // [2:2] is the sub-list for extension type_name
-	2,  // [2:2] is the sub-list for extension extendee
-	0,  // [0:2] is the sub-list for field type_name
+	16, // 1: tickets.v1.HoldResponse.expires_at:type_name -> google.protobuf.Timestamp
+	14, // 2: tickets.v1.SeatStatusesResponse.statuses:type_name -> tickets.v1.SeatStatusesResponse.StatusesEntry
+	0,  // 3: tickets.v1.InventoryService.Hold:input_type -> tickets.v1.HoldRequest
+	2,  // 4: tickets.v1.InventoryService.Release:input_type -> tickets.v1.ReleaseRequest
+	4,  // 5: tickets.v1.InventoryService.Convert:input_type -> tickets.v1.ConvertRequest
+	6,  // 6: tickets.v1.InventoryService.Commit:input_type -> tickets.v1.CommitRequest
+	8,  // 7: tickets.v1.InventoryService.OpenEvent:input_type -> tickets.v1.OpenEventRequest
+	10, // 8: tickets.v1.InventoryService.SeatStatuses:input_type -> tickets.v1.SeatStatusesRequest
+	12, // 9: tickets.v1.InventoryService.Sweep:input_type -> tickets.v1.SweepRequest
+	1,  // 10: tickets.v1.InventoryService.Hold:output_type -> tickets.v1.HoldResponse
+	3,  // 11: tickets.v1.InventoryService.Release:output_type -> tickets.v1.ReleaseResponse
+	5,  // 12: tickets.v1.InventoryService.Convert:output_type -> tickets.v1.ConvertResponse
+	7,  // 13: tickets.v1.InventoryService.Commit:output_type -> tickets.v1.CommitResponse
+	9,  // 14: tickets.v1.InventoryService.OpenEvent:output_type -> tickets.v1.OpenEventResponse
+	11, // 15: tickets.v1.InventoryService.SeatStatuses:output_type -> tickets.v1.SeatStatusesResponse
+	13, // 16: tickets.v1.InventoryService.Sweep:output_type -> tickets.v1.SweepResponse
+	10, // [10:17] is the sub-list for method output_type
+	3,  // [3:10] is the sub-list for method input_type
+	3,  // [3:3] is the sub-list for extension type_name
+	3,  // [3:3] is the sub-list for extension extendee
+	0,  // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_tickets_v1_inventory_proto_init() }

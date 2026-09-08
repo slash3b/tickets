@@ -3,6 +3,7 @@ syntax = "proto3";
 package tickets.v1;
 
 import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/slash3b/tickets/gen/tickets/v1;ticketsv1";
 
@@ -37,8 +38,30 @@ message HoldRequest {
   string event_id = 1;
   repeated string seat_ids = 2;
   google.protobuf.Duration ttl = 3;
+
+  // OPTIONAL. A stable key supplied by the caller so that a RETRY of this exact
+  // request returns the ORIGINAL hold instead of claiming a second set of seats.
+  //
+  // Without it a retried hold is the worst kind of failure available here: the
+  // first attempt succeeded and its response was lost, so the retry finds the
+  // seats already held — by the caller itself — and comes back ABORTED. The
+  // caller is told it lost a race it actually won, and the hold id is gone, so
+  // the seats sit locked until the TTL expires with nobody able to buy them.
+  //
+  // Derive it from something stable about the ATTEMPT, never from a clock or a
+  // fresh random value per try: a key that changes on retry is not a key. The
+  // gateway passes through the client's Idempotency-Key header verbatim.
+  string idempotency_key = 4;
 }
-message HoldResponse { string hold_id = 1; }
+message HoldResponse {
+  string hold_id = 1;
+
+  // When the short TTL runs out. Returned rather than computed by the caller
+  // because a REPLAYED hold expires when the ORIGINAL one does — a retry
+  // arriving 30s later does not get 30 more seconds, and a caller adding the
+  // TTL to its own clock would quietly believe it did.
+  google.protobuf.Timestamp expires_at = 2;
+}
 
 message ReleaseRequest {
   string hold_id = 1;

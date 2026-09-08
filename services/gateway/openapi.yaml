@@ -1,0 +1,665 @@
+# The gateway's HTTP surface — the only API a browser reaches.
+#
+# Written by hand from api.go, admin.go and stream.go and kept next to them. If you
+# change a route, a struct tag or a status code, change this file in the same commit.
+#
+# IT DESCRIBES THE CODE, NOT DESIGN.md. The PUBLIC API section of that document is the
+# older of the two and has drifted in three places: it specifies a WebSocket at
+# /api/events/{id}/live with a ?section= filter (the implementation is SSE at
+# /api/events/{id}/stream and filters nothing), and it claimed an Idempotency-Key on
+# every mutating call long before one was read. The header is real as of this file;
+# the WebSocket never was.
+#
+# OpenAPI 3.1.1, matching services/bank/openapi.yaml.
+openapi: 3.1.1
+
+info:
+  title: gateway
+  version: 0.1.0
+  summary: The browser-facing BFF for the ticket system.
+  description: |
+    Gateway owns no data. It calls catalog for what EXISTS, inventory for what is
+    AVAILABLE and orders to buy, and its whole job is assembling those answers into the
+    shapes a seat map needs. Everything below is JSON over plain HTTP; between services
+    the same operations are gRPC, generated from `proto/tickets/v1`.
+
+    THERE IS NO VERSION IN THESE PATHS, and that is a decision rather than an oversight.
+    The API has exactly one consumer — the SPA in `web/`, built by the same CI from the
+    same commit and served from the same origin — so there is no version skew to manage
+    and a `/v1` prefix would be ceremony. The internal protos ARE versioned
+    (`tickets.v1`), because buf's STANDARD lint ruleset requires it. The day anything
+    that is not redeployed in lockstep starts calling this API, add the prefix; doing it
+    afterwards is much more expensive.
+
+    THERE IS NO AUTHENTICATION ANYWHERE. `user_id` on `POST /api/orders` is asserted by
+    the client and checked by nothing; `X-Customer-Id` is telemetry, explicitly not
+    identity; the operator endpoint under `/api/admin` is unauthenticated and bounded by
+    size caps instead. This is coherent only because the whole cluster is RFC1918 and
+    reachable from the LAN alone. Do not expose this service to the internet as it
+    stands.
+
+    409 IS NOT AN ERROR HERE. Losing a race for a seat is the single most common
+    non-success outcome during an on-sale and it means the system is working. A client
+    that shows an error page on 409 has misread this API — the correct response is to
+    refetch the seat map and let the user choose again.
+
+    STALENESS IS PART OF THE CONTRACT. Seat statuses are served from a Redis projection
+    that is allowed to lag, so a seat the map showed as free may already be gone by the
+    time anyone clicks it. That is why the hold endpoint, not the map, is the thing that
+    decides who gets a seat.
+  license:
+    name: MIT
+
+servers:
+  - url: https://app.tickets.lan
+    description: |
+      What a browser uses. Envoy fans this hostname out by path: `/api/*` here, `/` to
+      the SPA, `/admin/sim` to the load generator and `/admin/bank` to the fake bank.
+      Those last two are NOT part of this API — see the simulator and bank specs.
+  - url: https://api.tickets.lan
+    description: The gateway alone, with no SPA and no operator fan-out.
+  - url: http://localhost:8080
+    description: Local run. `go run ./services/gateway/cmd`.
+
+tags:
+  - name: browse
+    description: Reads. Cacheable, and allowed to be stale.
+  - name: buy
+    description: The purchase path. The only endpoints that take an Idempotency-Key.
+  - name: live
+    description: The pushed seat map.
+  - name: operator
+    description: Staging a sale by hand. Unauthenticated; present only when the gateway is wired with an admin.
+
+paths:
+  /api/events:
+    get:
+      operationId: listEvents
+      tags: [browse]
+      summary: Events that are on sale now.
+      description: |
+        Capped at 50 server-side. There is no pagination — this is a homelab catalogue,
+        and adding a cursor before there is anything to page through would be inventing
+        a contract nobody can test.
+      responses:
+        '200':
+          description: The on-sale list, possibly empty.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: '#/components/schemas/Event' }
+        '500': { $ref: '#/components/responses/Error' }
+
+  /api/events/upcoming:
+    get:
+      operationId: listUpcoming
+      tags: [browse]
+      summary: Events announced but not yet on sale.
+      description: |
+        THE RESPONSE CARRIES on_sale_at AND NOTHING ABOUT SEATS, because there are no
+        seats yet. Inventory holds no rows for an event until its on-sale moment, which
+        is precisely why no endpoint in this API has to check a clock to decide whether
+        buying is allowed.
+
+        Registered ahead of `/api/events/{id}` in the mux. Without that ordering
+        "upcoming" is a perfectly good `{id}` that then fails to parse as a UUID.
+      responses:
+        '200':
+          description: The announced list, possibly empty.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: '#/components/schemas/Event' }
+        '500': { $ref: '#/components/responses/Error' }
+
+  /api/events/{id}:
+    get:
+      operationId: getEvent
+      tags: [browse]
+      summary: One event.
+      parameters:
+        - $ref: '#/components/parameters/EventID'
+      responses:
+        '200':
+          description: The event.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Event' }
+        '400': { $ref: '#/components/responses/Error' }
+        '404':
+          description: |
+            No such event. Note that a catalog failure also lands here rather than as a
+            500 — the handler cannot tell "absent" from "unreachable" through its client,
+            and 404 is the safer of the two to show a browser.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/events/{id}/sections:
+    get:
+      operationId: listSections
+      tags: [browse]
+      summary: The blocks of an event, with seat counts and price.
+      description: |
+        `price_minor` is here so the frontend can show a total before anyone commits.
+        It used to hardcode a number that mirrored the seeder, which would eventually
+        have charged a real amount for a guessed one.
+      parameters:
+        - $ref: '#/components/parameters/EventID'
+      responses:
+        '200':
+          description: The section list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sections]
+                properties:
+                  sections:
+                    type: array
+                    items: { $ref: '#/components/schemas/Section' }
+        '400': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
+
+  /api/events/{id}/sections/{sid}:
+    get:
+      operationId: sectionSeats
+      tags: [browse]
+      summary: The seat map for ONE section.
+      description: |
+        The read model, assembled from both owners: catalog says which seats exist and
+        where they are on the chart, inventory says which are free.
+
+        ONE SECTION AT A TIME, AND THERE IS NO WHOLE-EVENT ENDPOINT. At 20,000 seats
+        that would be a denial of service against your own database, and the table it
+        would scan is the same one every seat claim is contending on.
+
+        `status` IS ALLOWED TO BE STALE. It is served from the Redis projection when
+        that projection holds every requested seat, and from inventory otherwise — a
+        partial hit counts as a miss, because a seat map missing three seats is not a
+        stale map, it is a wrong one. A user clicking a seat this endpoint called
+        `available` and getting a 409 from `POST /api/holds` is correct behaviour.
+      parameters:
+        - $ref: '#/components/parameters/EventID'
+        - name: sid
+          in: path
+          required: true
+          description: Section id.
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Every seat in the section, with its status.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [seats]
+                properties:
+                  seats:
+                    type: array
+                    items: { $ref: '#/components/schemas/Seat' }
+        '400': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
+
+  /api/events/{id}/stream:
+    get:
+      operationId: streamSeatChanges
+      tags: [live]
+      summary: Seat status deltas, pushed. Server to client only.
+      description: |
+        A `text/event-stream` connection held open for as long as the page is. Each
+        message is one `data:` line carrying a SeatChange object.
+
+        SSE RATHER THAN WEBSOCKETS, deliberately: this is one-directional, so the
+        browser has nothing to say back that is not already an ordinary POST. SSE is
+        plain HTTP, crosses the Gateway with no protocol upgrade, reconnects on its own
+        and needs no library on either side. DESIGN.md still describes a WebSocket at
+        `/api/events/{id}/live`; that endpoint does not exist.
+
+        NO SECTION FILTER. Every subscriber to an event receives every change for that
+        event and filters client-side. DESIGN.md specifies a `?section=` query
+        parameter; it is not implemented, and the query string is ignored.
+
+        THIS ROUTE IS NOT TRACED, on purpose. A span that lives as long as the
+        connection says only that somebody has a tab open. The interesting spans are the
+        changes flowing through it, and those belong to inventory.
+
+        OPERATIONALLY: Envoy's default route timeout is 15 seconds and would sever this
+        every fifteen seconds forever, so the HTTPRoute for `/api/events` carries an
+        explicit 3600s timeout. `X-Accel-Buffering: no` is set for any nginx in the path.
+
+        Each replica consumes Kafka under its OWN group id, so every replica sees every
+        message — a shared consumer group would split partitions between replicas and
+        browsers on the other ones would hear nothing.
+      parameters:
+        - $ref: '#/components/parameters/EventID'
+      responses:
+        '200':
+          description: |
+            The stream is open. A `: connected` comment is written immediately so the
+            browser's EventSource fires `onopen` and any proxy in the middle learns the
+            connection is alive.
+          content:
+            text/event-stream:
+              schema: { type: string }
+              example: |
+                : connected
+
+                data: {"event_id":"6f1c…","seat_ids":["a1b2…"],"status":"held","hold_id":"9d0e…","at":"2026-09-08T10:04:11Z"}
+        '400': { $ref: '#/components/responses/Error' }
+        '503':
+          description: |
+            Streaming is not wired — no Kafka brokers configured. Deliberately an
+            immediate failure rather than an idle connection, so the client falls back to
+            polling instead of sitting on a socket that will never speak.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/holds:
+    post:
+      operationId: createHold
+      tags: [buy]
+      summary: Claim seats for a few minutes. All or nothing.
+      description: |
+        The contended write, and the endpoint the whole system exists to make correct.
+        Either every requested seat is claimed or none is — handing someone two of the
+        three seats they asked for is worse than handing them none.
+
+        SEND AN Idempotency-Key. Without one, a retry after a lost response is the worst
+        failure this API has: the first attempt succeeded, so the retry finds the seats
+        already held BY THE CALLER ITSELF and comes back 409. The caller is told it lost
+        a race it actually won, its `hold_id` is gone, and the seats it just paid the
+        contention cost to win sit locked until the TTL expires with nobody able to buy
+        them. With a key, the retry returns the original hold.
+
+        `expires_at` COMES FROM INVENTORY, NOT FROM YOUR CLOCK. A replayed hold expires
+        when the ORIGINAL one does — a retry arriving thirty seconds later does not get
+        thirty more seconds.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CustomerID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [event_id, seat_ids]
+              properties:
+                event_id: { type: string, format: uuid }
+                seat_ids:
+                  type: array
+                  minItems: 1
+                  items: { type: string, format: uuid }
+                  description: Deduplicated and sorted server-side before locking, so that overlapping multi-seat requests acquire in a consistent order and mostly do not deadlock.
+      responses:
+        '201':
+          description: The seats are yours until `expires_at`.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [hold_id, expires_at]
+                properties:
+                  hold_id: { type: string, format: uuid }
+                  expires_at:
+                    type: string
+                    format: date-time
+                    description: When the short TTL runs out and the sweeper may reclaim the seats. Stops applying once an order moves the hold to `converting`.
+        '400':
+          description: |
+            Malformed body, no seats requested, or an unusable Idempotency-Key. An
+            unusable key FAILS THE REQUEST rather than being ignored — quietly dropping
+            it would leave the client believing its retries are safe when they are not.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: |
+            At least one seat was taken first, and nothing was claimed. A NORMAL outcome
+            — refetch the section and let the user pick again.
+
+            A REPLAY WHOSE HOLD HAS SINCE EXPIRED ARRIVES HERE TOO. An idempotency key
+            names one hold for good, so once that hold is released or consumed there is
+            nothing left to replay and the seats really are gone. Recovery is identical.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500': { $ref: '#/components/responses/Error' }
+
+  /api/holds/{id}:
+    delete:
+      operationId: releaseHold
+      tags: [buy]
+      summary: Give the seats back before the TTL runs out.
+      description: |
+        Recorded with reason `user_cancelled`, which is durable and distinguishable from
+        `expired` — "did this hold die of an abandoned checkout or a slow bank" are
+        different questions with different consequences, and the difference is invisible
+        once the row just says released.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Hold id.
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/CustomerID'
+      responses:
+        '204':
+          description: Released. No body.
+        '400': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
+
+  /api/orders:
+    post:
+      operationId: createOrder
+      tags: [buy]
+      summary: Buy the held seats. Starts the saga.
+      description: |
+        Converts the hold, charges the bank and commits the seats. The response is the
+        state the saga actually reached, which is NOT always terminal — an unknown
+        payment outcome leaves the order mid-flight for the resumer to finish, and
+        reporting that honestly is what stops a client retrying something already in
+        progress.
+
+        ALREADY SAFE TO RETRY, AND NOT BECAUSE OF THE HEADER. `orders.hold_id` is UNIQUE
+        and the insert is an upsert on it, so a second attempt for the same hold returns
+        the SAME `order_id` and its current state rather than starting a second purchase;
+        the saga behind it is re-entrant because the crash resumer calls it that way.
+        THE HOLD ID IS THE IDEMPOTENCY KEY, and it is a better one than a header because
+        a client cannot forget to send it or vary it between tries.
+
+        The header is still accepted and validated so a client can send one uniformly on
+        every mutating call. It is not stored: two keys that can disagree about whether
+        this is the same request would be worse than one. Send the `hold_id` as the key.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CustomerID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hold_id, event_id, user_id, amount_minor]
+              properties:
+                hold_id: { type: string, format: uuid }
+                event_id: { type: string, format: uuid }
+                user_id:
+                  type: string
+                  format: uuid
+                  description: ASSERTED BY THE CLIENT AND VERIFIED BY NOTHING. There is no authentication in this system; see the top-level description.
+                amount_minor:
+                  type: integer
+                  format: int64
+                  exclusiveMinimum: 0
+                  description: Minor units, so 1250 is £12.50. Money is never a float here.
+      responses:
+        '201':
+          description: |
+            The order exists. Check `state` — `confirmed` and `failed` are terminal;
+            anything else means the resumer will finish it, and the client should poll
+            `GET /api/orders/{id}` rather than retry the purchase.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '400':
+          description: Malformed body, a non-positive amount, or an unusable Idempotency-Key.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500': { $ref: '#/components/responses/Error' }
+
+  /api/orders/{id}:
+    get:
+      operationId: getOrder
+      tags: [buy]
+      summary: Poll an order's state.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Order id.
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/CustomerID'
+      responses:
+        '200':
+          description: The order's current state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '400': { $ref: '#/components/responses/Error' }
+        '404':
+          description: No such order.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/admin/showings:
+    post:
+      operationId: createShowing
+      tags: [operator]
+      summary: Stage an event, its venue and its seats in one call.
+      description: |
+        Present only when the gateway is wired with an admin — which it is on this
+        cluster, because this gateway IS the operator surface here. A deployment that
+        should not serve it leaves it off rather than relying on routing to hide it.
+
+        UNAUTHENTICATED, WHICH IS WHY THE CAPS EXIST. A typo of one extra digit in `rows`
+        is a request to build a million seat rows and inventory would honestly try. The
+        arena preset is 20,000 seats; the hard ceiling is 60,000.
+
+        VENUES ARE FOUND BY NAME AND BUILT ONLY WHEN MISSING, so asking for a custom
+        layout under a name that already exists gets you the EXISTING chart at its
+        original size. `venue_reused` in the response is how you tell — silently building
+        a show on the wrong size of room is a confusing hour.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                on_sale_in_seconds:
+                  type: integer
+                  description: Seconds from now until it goes on sale. Small on purpose — this exists so a sale can be staged and watched, not scheduled for next week.
+                venue:
+                  type: string
+                  enum: [arena, cinema, custom]
+                  default: arena
+                  description: Anything else is rejected rather than guessed at. An empty value means arena.
+                venue_name:
+                  type: string
+                  maxLength: 80
+                  description: Custom only. Defaults to a name encoding the shape, e.g. `Custom 4x20x30`, so two different shapes cannot collide on one name.
+                sections: { type: integer, maximum: 40, description: 'Custom only. Zero takes the arena preset. One section is priced and labelled as a cinema screen; several as an arena.' }
+                rows: { type: integer, maximum: 500, description: Custom only. Zero takes the arena preset. }
+                seats_per_row: { type: integer, maximum: 100, description: Custom only. Zero takes the arena preset. }
+      responses:
+        '201':
+          description: The showing exists and its seats are open or scheduled to open.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [event_id, title, venue, on_sale_at, seats, venue_reused]
+                properties:
+                  event_id: { type: string, format: uuid }
+                  title: { type: string }
+                  venue: { type: string }
+                  on_sale_at: { type: string, format: date-time }
+                  seats: { type: integer }
+                  venue_reused:
+                    type: boolean
+                    description: True when the seating chart already existed and was reused, so the layout you asked for was ignored.
+        '400':
+          description: Malformed body, an unknown venue kind, or a layout over the caps. The message names the limit that was exceeded.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500': { $ref: '#/components/responses/Error' }
+
+components:
+  parameters:
+    EventID:
+      name: id
+      in: path
+      required: true
+      description: Event id.
+      schema: { type: string, format: uuid }
+
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: |
+        Makes this call safe to retry. The same key returns the original result instead
+        of performing the operation twice.
+
+        DERIVE IT FROM SOMETHING STABLE ABOUT THE ATTEMPT — an order id, a hold id, a
+        uuid minted once when the user clicks and reused across every retry of that
+        click. Never from a clock or a fresh random value per try: a key that changes on
+        retry is not a key.
+
+        OPTIONAL RATHER THAN REQUIRED. Demanding it would 400 every client not yet taught
+        to send one, while the safety it buys only exists for a client that actually
+        retries. Everything in this repo sends one.
+
+        An unusable key is a 400, not a shrug — see the endpoint responses.
+      schema:
+        type: string
+        maxLength: 128
+        pattern: '^[A-Za-z0-9._:-]+$'
+
+    CustomerID:
+      name: X-Customer-Id
+      in: header
+      required: false
+      description: |
+        TELEMETRY, NOT IDENTITY. It authenticates nothing and authorises nothing.
+
+        The gateway puts it into OpenTelemetry baggage at this, the only door into the
+        system, so it crosses every gRPC hop on its own and every downstream service can
+        tag its own spans without taking a customer id as a parameter. In SigNoz, filter
+        spans on `customer.id` and logs on `customer_id`.
+
+        Values over 64 characters, or containing anything outside `[A-Za-z0-9._-]`, are
+        DROPPED rather than escaped — the value ends up in a propagation header, and a
+        comma or semicolon in it would corrupt that header for everything downstream.
+      schema:
+        type: string
+        maxLength: 64
+        pattern: '^[A-Za-z0-9._-]+$'
+
+  responses:
+    Error:
+      description: Something went wrong. The body never leaks an internal message.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: |
+            A sentence a UI can show. There is no machine-readable code and no
+            `problem+json` — the HTTP status carries the meaning, and 409 in particular
+            is the one a client must branch on.
+      examples:
+        - error: one or more seats were just taken
+
+    Event:
+      type: object
+      required: [id, title, venue, starts_at, on_sale_at]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        venue: { type: string }
+        starts_at: { type: string, format: date-time }
+        on_sale_at:
+          type: string
+          format: date-time
+          description: When seats become buyable. An event in the future has NO seats in inventory at all, which is why no endpoint here checks a clock.
+
+    Section:
+      type: object
+      required: [id, name, seats, price_minor]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        seats: { type: integer, description: How many seats the section contains, not how many are free. }
+        price_minor: { type: integer, format: int64, description: Per seat, in minor units. }
+
+    Seat:
+      type: object
+      required: [id, row, number, x, y]
+      properties:
+        id: { type: string, format: uuid }
+        row: { type: string }
+        number: { type: integer }
+        x: { type: number, format: double, description: Position on the seating chart, for drawing. Catalog's, and it never changes. }
+        y: { type: number, format: double }
+        status:
+          type: string
+          enum: [available, held, sold]
+          description: |
+            From inventory, not catalog, and ALLOWED TO BE STALE — see the endpoint.
+            Omitted entirely when inventory has no row for the seat, which is the normal
+            state of an event that has not gone on sale.
+
+    Order:
+      type: object
+      required: [order_id, state]
+      properties:
+        order_id: { type: string, format: uuid }
+        state:
+          type: string
+          enum: [created, awaiting_payment, paid, confirmed, failed, reconciling, refunded, unknown]
+          description: |
+            The saga's own vocabulary, written to the database as text rather than as an
+            enum so there is only one definition of the set.
+
+            `confirmed`, `failed` and `refunded` are terminal. EVERYTHING INTERESTING
+            LIVES IN THE GAP BETWEEN `paid` AND `confirmed`: money has moved but the
+            seats are not sold yet. That gap is crossed by forward recovery, never by
+            rollback — the seats are still held in `converting` so nobody else can take
+            them, and the right answer is to retry the commit rather than to un-charge.
+            `reconciling` means we hold money we could not deliver seats for and a refund
+            is owed. `unknown` means the state could not be read, not that the order is
+            in a state called unknown.
+
+    SeatChange:
+      description: One message on the SSE stream.
+      type: object
+      required: [event_id, seat_ids, status, at]
+      properties:
+        event_id: { type: string, format: uuid }
+        section_id: { type: string, format: uuid }
+        seat_ids:
+          type: array
+          items: { type: string, format: uuid }
+        hold_id: { type: string, format: uuid }
+        order_id: { type: string, format: uuid }
+        status:
+          type: string
+          enum: [available, held, sold]
+        reason:
+          type: string
+          description: Why seats went back, when they did — `expired`, `hard_deadline`, `cancelled` or `consumed`.
+        at: { type: string, format: date-time }
