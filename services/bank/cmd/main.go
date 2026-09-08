@@ -65,6 +65,7 @@ func run() error {
 
 	mux := http.NewServeMux()
 	mux.Handle("/", bank.New(cfg).WithLogger(lg).Handler())
+
 	health.New(lg).Register(ctx, mux, 2*time.Second, 15*time.Second)
 
 	srv := &http.Server{Addr: ":" + port, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
