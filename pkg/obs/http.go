@@ -143,7 +143,17 @@ func access(lg *zap.Logger, route string, h http.HandlerFunc) http.Handler {
 		if rec.status >= 500 {
 			log = logger.Ctx(r.Context(), lg).Error
 		}
-		log("request",
+		// THE BODY IS THE ONLY THING A LOG LIST SHOWS, and "request" made every
+		// line identical — you had to open one to learn anything at all. It now
+		// says what happened. Method, route and status ONLY: all three are
+		// bounded, so identical requests still collapse into one group. The
+		// duration stays a field precisely because it differs on every call and
+		// would turn every line into its own group.
+		//
+		// The route ALREADY CARRIES THE METHOD — it is a Go 1.22 ServeMux
+		// pattern, "GET /api/events" — so prefixing r.Method here prints it
+		// twice.
+		log(fmt.Sprintf("%s %d", route, rec.status),
 			zap.String("route", route),
 			zap.String("method", r.Method),
 			zap.Int("status", rec.status),

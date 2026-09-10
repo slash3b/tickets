@@ -14,6 +14,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
@@ -142,14 +143,39 @@ func accessLog(lg *zap.Logger) grpc.UnaryServerInterceptor {
 		if isFault(code) {
 			log = logger.Ctx(ctx, lg).Error
 		}
-		log("rpc",
+		// Same reasoning as the HTTP side: the body says what happened rather
+		// than the word "rpc". Short method and code only, both bounded; the
+		// full method stays on the field below for anything that needs to match
+		// on the exact path.
+		// THE ERROR TEXT WAS BEING DROPPED ON THE FLOOR. The code alone says
+		// "Aborted"; it does not say WHICH seat lost, or to whom. It is logged
+		// for every non-OK — fault or not — because the not-a-fault ones are
+		// exactly the calls someone ends up reading a log to understand. The
+		// status message only, not err.Error(), which would prefix every line
+		// with "rpc error: code = Aborted desc = ".
+		errText := zap.Skip()
+		if err != nil {
+			errText = zap.String("err", status.Convert(err).Message())
+		}
+
+		log(shortMethod(info.FullMethod)+" "+code.String(),
 			zap.String("method", info.FullMethod),
 			zap.String("code", code.String()),
 			zap.Duration("took", time.Since(start)),
+			errText,
 			obs.CustomerField(ctx),
 		)
 		return resp, err
 	}
+}
+
+// shortMethod turns /tickets.v1.CatalogService/ListOnSale into ListOnSale, which
+// is the part a human reads. The full path is still logged as a field.
+func shortMethod(full string) string {
+	if i := strings.LastIndexByte(full, '/'); i >= 0 && i+1 < len(full) {
+		return full[i+1:]
+	}
+	return full
 }
 
 // isFault separates "we are broken" from "the answer was no".

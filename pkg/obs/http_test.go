@@ -34,9 +34,14 @@ func TestAccessLogIsCorrelated(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/things/abc", nil)
 	mux.ServeHTTP(httptest.NewRecorder(), req)
 
-	entries := logs.FilterMessage("request").All()
+	// THE MESSAGE IS THE LINE ITSELF, not a fixed word. A log list shows the
+	// body and nothing else, so "request" on every line meant opening one to
+	// learn anything. Route and status only — both bounded, so the lines still
+	// group; the duration stays a field because it differs every time.
+	const want = "GET /api/things/{id} 418"
+	entries := logs.FilterMessage(want).All()
 	if len(entries) != 1 {
-		t.Fatalf("got %d request log lines, want 1", len(entries))
+		t.Fatalf("got %d %q log lines, want 1 (all: %v)", len(entries), want, logs.All())
 	}
 	fields := entries[0].ContextMap()
 
