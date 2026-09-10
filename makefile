@@ -8,6 +8,25 @@ PG_URL       := postgres://tickets:tickets@127.0.0.1:55432/tickets?sslmode=disab
 # everything through kubectl and needs a shell that can reach the cluster.
 CONTROL_PLANE := slash3b@192.168.1.116
 
+# HOW THE WIPE TARGETS REACH IT. Key auth if this machine has one installed on the
+# control plane; otherwise ssh falls through to its password prompt, which works
+# even though the script occupies stdin because ssh reads passwords from /dev/tty,
+# not from stdin. Nothing extra is needed to type a password - just run the target.
+#
+#   SSH_OPTS='-o PubkeyAuthentication=no'   skip a key that will be rejected and go
+#                                           straight to the password prompt
+#   SSHPASS=... make wipe-plan SSH=sshpass\ -e\ ssh
+#                                           non-interactive, for a machine with no
+#                                           key. sshpass -e takes the password from
+#                                           the SSHPASS environment variable, so it
+#                                           never lands in a file, in `ps`, or here -
+#                                           THIS REPO IS PUBLIC, so never write a
+#                                           password into this makefile. Prefer
+#                                           `ssh-copy-id slash3b@192.168.1.116` once
+#                                           over carrying SSHPASS around.
+SSH      ?= ssh
+SSH_OPTS ?=
+
 help:
 	@grep -E '^[a-z-]+:.*?##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/' | column -t -s "$$(printf '\t')"
 
@@ -79,16 +98,16 @@ define require_confirm
 endef
 
 wipe-plan: ## show what a data wipe would do, changing nothing
-	ssh $(CONTROL_PLANE) 'bash -s -- --all --dry-run' < scripts/wipe.sh
+	$(SSH) $(SSH_OPTS) $(CONTROL_PLANE) 'bash -s -- --all --dry-run' < scripts/wipe.sh
 
 wipe: ## DESTRUCTIVE: postgres rows, the redis projection, the bank's charges
 	$(require_confirm)
-	ssh $(CONTROL_PLANE) 'bash -s -- --data --yes' < scripts/wipe.sh
+	$(SSH) $(SSH_OPTS) $(CONTROL_PLANE) 'bash -s -- --data --yes' < scripts/wipe.sh
 
 wipe-telemetry: ## DESTRUCTIVE: SigNoz traces, logs and metrics
 	$(require_confirm)
-	ssh $(CONTROL_PLANE) 'bash -s -- --telemetry --yes' < scripts/wipe.sh
+	$(SSH) $(SSH_OPTS) $(CONTROL_PLANE) 'bash -s -- --telemetry --yes' < scripts/wipe.sh
 
 wipe-all: ## DESTRUCTIVE: everything above, application state and telemetry
 	$(require_confirm)
-	ssh $(CONTROL_PLANE) 'bash -s -- --all --yes' < scripts/wipe.sh
+	$(SSH) $(SSH_OPTS) $(CONTROL_PLANE) 'bash -s -- --all --yes' < scripts/wipe.sh

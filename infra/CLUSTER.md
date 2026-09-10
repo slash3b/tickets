@@ -1,5 +1,5 @@
 HOMELAB KUBERNETES - STATE OF THE CLUSTER
-Snapshot 2026-08-30, taken from k8s-ctrl-plane (192.168.1.116).
+Snapshot 2026-09-10, taken from k8s-ctrl-plane (192.168.1.116).
 Changes made 2026-08-23/24: cineplex removed, slash3b account added, Argo CD 3.0.6 -> 3.5.1.
 2026-08-24: CLEAN SLATE. All observability leftovers deleted - 2 PVCs, 13 CRDs, 4 empty
 namespaces, 3 helm repos, stale images on every node. Disk 83/50/43% -> 47/29/16%, ~30G
@@ -61,6 +61,44 @@ ACCESS
   The workstation itself still has no host keys or authorized key for the workers; go
   through the control plane, or repeat ssh-copy-id from the workstation if direct access
   is wanted.
+
+  WORKSTATION -> CONTROL PLANE, repaired 2026-09-10, and it is what broke `make wipe-*`.
+  Every wipe target is `ssh $(CONTROL_PLANE) 'bash -s ...' < scripts/wipe.sh`, so it fails
+  at ssh long before the script runs and the error says nothing about wiping.
+
+    1. STALE HOST KEY. The workstation's ~/.ssh/known_hosts line 17 still held the ECDSA
+       key from before the reboot that regenerated the control plane's keys, so ssh
+       refused with REMOTE HOST IDENTIFICATION HAS CHANGED. Not an attack: the ED25519
+       key the host now offers is SHA256:Ro/SHox0uvyks6ziKPi2N3DyDxiRR54UzhPe8AfpXIk,
+       the same fingerprint already verified out-of-band through the Proxmox guest agent
+       (see CONTROL PLANE DNS). Stale entry removed with `ssh-keygen -R 192.168.1.116`
+       and the verified ED25519 key added. ssh keeps the old file as known_hosts.old.
+
+    2. NO AUTHORIZED KEY on this workstation. The key
+         ssh-ed25519 ... slash3b@gmail.com  SHA256:kx9PExloGZnwnOmcXF14oGZo8ddtXRKNxVLyeP2eJWQ
+       is offered and rejected - it is not in ~slash3b/.ssh/authorized_keys on .116. The
+       control plane's OWN key (gcgPtrJ4...) is the one recorded above as installed on the
+       workers; the workstation's was never installed here, or was lost with the rebuild.
+       Install it once, which needs the account password that one time:
+         ssh-copy-id -i ~/.ssh/id_ed25519.pub slash3b@192.168.1.116
+
+       NOT A BLOCKER THOUGH, and the earlier note here claiming it was is wrong. ssh
+       falls through to its PASSWORD PROMPT, and that prompt works even though the wipe
+       script occupies stdin, because ssh reads passwords from /dev/tty rather than from
+       stdin. `make wipe-all CONFIRM=WIPE` in a real terminal simply asks for the
+       password. Only two things genuinely cannot read a password: the script's own
+       "type WIPE" prompt (`read` from stdin, which IS the script - hence --yes and the
+       CONFIRM= guard in the makefile), and any non-interactive caller with no tty.
+
+       WHAT MISLEADS YOU HERE is `-o BatchMode=yes`, which turns the prompt into a flat
+       "Permission denied (publickey,password)" that reads like key auth is required.
+       Diagnose with a plain `ssh -v`, not a BatchMode one.
+
+       For a machine with no key and no tty, the makefile takes overrides:
+         make wipe-plan SSH_OPTS='-o PubkeyAuthentication=no'   straight to the prompt
+         SSHPASS=... make wipe-plan SSH='sshpass -e ssh'        no prompt at all
+       sshpass -e reads the SSHPASS environment variable, so the password stays out of
+       the repo, out of `ps` and out of this file.
 
   PASSWORD AUTH IS STILL ENABLED on both workers. Now that key auth works it should be
   turned off - set PasswordAuthentication no in /etc/ssh/sshd_config on each worker and
@@ -970,6 +1008,16 @@ OBSERVABILITY - SIGNOZ, INSTALLED 2026-08-24
   Verified 2026-08-29: 4 venues / 6 events / 608 seats / 73 orders / 8 Redis keys
   -> all zero, then a cinema showing staged from the operator page opened 96 seats
   and sold one.
+
+  RUN AGAIN 2026-09-10, --all, no backup taken and none wanted - this is simulated
+  state, not records. 1 venue / 1 event / 20000 catalog seats / 20000 inventory
+  seats / 1101 holds / 1067 orders / 1067 payments / 1 Redis key -> all zero, plus
+  50 ClickHouse tables truncated, which threw away that evening's traces and logs
+  along with the run they described. The residual counts printed straight after a
+  --telemetry wipe are NOT a failure: the collector is already writing again by the
+  time the summary query runs, so a few hundred rows is what success looks like.
+  The simulator was restored to 1 replica by the trap and now idles - nothing is on
+  sale until a showing is staged at https://app.tickets.lan/admin.
 
   The seeder was worse. It passed nil as the log provider and never called
   obs.Setup at all, and its manifest had no OTLP endpoint, so the one job that
