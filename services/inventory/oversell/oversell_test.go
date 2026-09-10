@@ -103,7 +103,7 @@ func TestNoOversellThroughGRPC(t *testing.T) {
 			defer wg.Done()
 			<-start // release them together, so they genuinely contend
 			seat := seats[i%seatCount]
-			_, err := client.Hold(ctx, eventID, []uuid.UUID{seat}, time.Minute)
+			_, _, err := client.Hold(ctx, eventID, []uuid.UUID{seat}, time.Minute, "")
 			switch {
 			case err == nil:
 				won.Add(1)

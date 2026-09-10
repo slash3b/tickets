@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -51,7 +52,10 @@ func (s *Server) Hold(ctx context.Context, req *pb.HoldRequest) (*pb.HoldRespons
 		return nil, status.Error(codes.InvalidArgument, "event_id, seat_ids and ttl are required")
 	}
 
-	id, err := s.store.Hold(ctx, eventID, seats, ttl)
+	// The key is passed through UNVALIDATED beyond its length, which the gateway
+	// already bounds. Inventory does not care what it means — only that the same
+	// string twice is the same request twice.
+	id, expiresAt, err := s.store.Hold(ctx, eventID, seats, ttl, req.GetIdempotencyKey())
 	switch {
 	case errors.Is(err, store.ErrSeatsUnavailable):
 		// ABORTED, and this code is the contract. It is the documented status for
@@ -69,7 +73,7 @@ func (s *Server) Hold(ctx context.Context, req *pb.HoldRequest) (*pb.HoldRespons
 		EventID: req.GetEventId(), SeatIDs: req.GetSeatIds(),
 		HoldID: id.String(), Status: "held",
 	})
-	return &pb.HoldResponse{HoldId: id.String()}, nil
+	return &pb.HoldResponse{HoldId: id.String(), ExpiresAt: timestamppb.New(expiresAt)}, nil
 }
 
 // publish is fire-and-forget. A seat claim must never wait on a broker: the

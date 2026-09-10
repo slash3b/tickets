@@ -128,12 +128,12 @@ func event(e *pb.Event) (Event, error) {
 // errors.Is compares identity, so the three have to be joined somewhere explicit.
 type InventoryClient struct{ C *inventory.Client }
 
-func (a InventoryClient) Hold(ctx context.Context, eventID uuid.UUID, seatIDs []uuid.UUID, ttl time.Duration) (uuid.UUID, error) {
-	id, err := a.C.Hold(ctx, eventID, seatIDs, ttl)
+func (a InventoryClient) Hold(ctx context.Context, eventID uuid.UUID, seatIDs []uuid.UUID, ttl time.Duration, idempotencyKey string) (uuid.UUID, time.Time, error) {
+	id, expiresAt, err := a.C.Hold(ctx, eventID, seatIDs, ttl, idempotencyKey)
 	if errors.Is(err, inventorystore.ErrSeatsUnavailable) {
-		return uuid.Nil, ErrSeatsGone
+		return uuid.Nil, time.Time{}, ErrSeatsGone
 	}
-	return id, err
+	return id, expiresAt, err
 }
 
 func (a InventoryClient) Release(ctx context.Context, holdID uuid.UUID, reason string) error {

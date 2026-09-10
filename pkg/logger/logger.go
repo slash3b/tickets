@@ -32,6 +32,7 @@ func MustNew(service string, debug bool, provider otellog.LoggerProvider) (*zap.
 	}
 
 	lg := stdout
+
 	if provider != nil {
 		// THE OTLP CORE MUST BE GATED AT THE SAME LEVEL AS STDOUT.
 		//

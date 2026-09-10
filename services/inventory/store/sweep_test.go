@@ -24,7 +24,7 @@ func TestSweepExpiredReleasesActiveHolds(t *testing.T) {
 	seats := seedSeats(t, s, event, 2)
 	ctx := context.Background()
 
-	holdID, err := s.Hold(ctx, event, seats, time.Minute)
+	holdID, _, err := s.Hold(ctx, event, seats, time.Minute, "")
 	if err != nil {
 		t.Fatalf("hold: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestSweepExpiredIgnoresConvertingHolds(t *testing.T) {
 	seats := seedSeats(t, s, event, 2)
 	ctx := context.Background()
 
-	holdID, err := s.Hold(ctx, event, seats, time.Minute)
+	holdID, _, err := s.Hold(ctx, event, seats, time.Minute, "")
 	if err != nil {
 		t.Fatalf("hold: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestSweepHardDeadlineReleasesStuckConverting(t *testing.T) {
 	seats := seedSeats(t, s, event, 2)
 	ctx := context.Background()
 
-	holdID, err := s.Hold(ctx, event, seats, time.Minute)
+	holdID, _, err := s.Hold(ctx, event, seats, time.Minute, "")
 	if err != nil {
 		t.Fatalf("hold: %v", err)
 	}

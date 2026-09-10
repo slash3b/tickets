@@ -567,29 +567,73 @@ one set of topics idle and one partition on fire.
 PUBLIC API
 ----------
 
-REST over HTTP, JSON, served by gateway. Every mutating call takes an Idempotency-Key
-header and is safe to retry.
+REST over HTTP, JSON, served by gateway. THE FULL SPEC IS services/gateway/openapi.yaml,
+written from the handlers and kept next to them; what follows is the shape, not the
+contract.
 
   GET    /api/events                        list on-sale events
+  GET    /api/events/upcoming               announced, not yet buyable. Carries on_sale_at
+                                            and nothing about seats, because there are no
+                                            seats yet.
   GET    /api/events/{id}                   event detail
-  GET    /api/events/{id}/sections          section list + availability counts
+  GET    /api/events/{id}/sections          section list + seat counts + price
   GET    /api/events/{id}/sections/{sid}    seats + status for ONE section. Cached and
                                             explicitly stale. Never a whole-event dump -
                                             that endpoint does not exist, on purpose.
+  SSE    /api/events/{id}/stream            seat status deltas, server -> client only.
   POST   /api/holds                         {event_id, seat_ids[]} -> {hold_id, expires_at}
                                             409 if any seat is gone. All or nothing.
   DELETE /api/holds/{id}                    release early
-  POST   /api/orders                        {hold_id} -> {order_id, status}
+  POST   /api/orders                        {hold_id, event_id, user_id, amount_minor}
+                                            -> {order_id, state}
   GET    /api/orders/{id}                   poll order status
-  WS     /api/events/{id}/live?section=   seat status deltas, server -> client only.
-                                            Subscription is per section for the same
-                                            reason the REST read is: an arena's whole-
-                                            event delta stream fans out to too many
-                                            browsers to be worth sending.
+  POST   /api/admin/showings                stage an event, its venue and its seats.
+                                            Operator only, and unauthenticated - the size
+                                            caps in admin.go are what stands in for auth.
 
-  POST   /api/sim/config                    simulator knobs, see below
+  POST   /api/sim/config                    simulator knobs, see below. NOT served by
+                                            gateway - Envoy routes /admin/sim to the
+                                            simulator's own listener.
 
 Internal calls are gRPC between services. HTTP only at the edge.
+
+IDEMPOTENCY. The two mutating calls on the purchase path are safe to retry, but by two
+different mechanisms, and the difference is worth knowing before adding a third:
+
+  POST /api/holds    takes an Idempotency-Key header. Optional; when present the same key
+                     returns the ORIGINAL hold and its ORIGINAL expiry. The key is stored
+                     on inventory.holds under a partial unique index, so concurrency is
+                     settled by the database rather than by a check-then-insert.
+
+                     WITHOUT A KEY the retry after a lost response is the worst failure
+                     this API has. The first attempt succeeded, so the retry finds the
+                     seats held BY THE CALLER ITSELF and gets 409 - told it lost a race it
+                     won, with the hold id gone and the seats locked until the sweeper
+                     takes them. This is why the header exists at all; a double booking
+                     was never the risk, the claim statement already prevents that.
+
+  POST /api/orders   needs no key. orders.hold_id is UNIQUE and the insert is an upsert on
+                     it, so a retry returns the same order_id and its current state, and
+                     the saga behind it is re-entrant because the crash resumer calls it
+                     that way. THE HOLD ID IS THE KEY, and a better one than a header -
+                     a client cannot forget it or vary it between tries. The header is
+                     accepted and validated so clients can send one uniformly, and
+                     deliberately not stored: two keys that can disagree about whether
+                     this is the same request are worse than one.
+
+  DELETE /api/holds/{id}  and the reads are idempotent by construction.
+
+An unusable key is a 400 rather than being ignored. Dropping it silently would leave the
+client believing its retries are safe when they are not, and the promise is the entire
+value of the header.
+
+SSE, NOT WEBSOCKETS, and no ?section= filter. This paragraph used to specify
+WS /api/events/{id}/live?section= for the reason that an arena's whole-event delta stream
+fans out to too many browsers. The implementation went the other way: the stream is
+per EVENT and the browser filters, because a seat change knows its seats and which
+section they belong to is catalog's business - keying the hub by section would mean asking
+catalog on every message. SSE because this is one-directional, crosses the Gateway with no
+protocol upgrade, and reconnects itself.
 
 
 THE FAKE BANK

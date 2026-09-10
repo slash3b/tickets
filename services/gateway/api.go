@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,7 +33,7 @@ type Catalog interface {
 }
 
 type Inventory interface {
-	Hold(ctx context.Context, eventID uuid.UUID, seatIDs []uuid.UUID, ttl time.Duration) (uuid.UUID, error)
+	Hold(ctx context.Context, eventID uuid.UUID, seatIDs []uuid.UUID, ttl time.Duration, idempotencyKey string) (uuid.UUID, time.Time, error)
 	Release(ctx context.Context, holdID uuid.UUID, reason string) error
 	SeatStatuses(ctx context.Context, eventID uuid.UUID, seatIDs []uuid.UUID) (map[uuid.UUID]string, error)
 }
@@ -272,17 +273,30 @@ type holdRequest struct {
 	SeatIDs []uuid.UUID `json:"seat_ids"`
 }
 
+// createHold claims seats. SAFE TO RETRY when the caller sends an
+// Idempotency-Key: the same key returns the same hold rather than trying to claim
+// a second set of seats. See the note on HoldRequest in the proto for what a
+// retry without one actually does to the person at the seat map.
 func (a *API) createHold(w http.ResponseWriter, r *http.Request) {
+	key, ok := idempotencyKey(w, r)
+	if !ok {
+		return
+	}
+
 	var req holdRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.SeatIDs) == 0 {
 		fail(w, http.StatusBadRequest, "event_id and at least one seat_id are required")
 		return
 	}
 
-	holdID, err := a.inventory.Hold(r.Context(), req.EventID, req.SeatIDs, a.holdTTL)
+	holdID, expiresAt, err := a.inventory.Hold(r.Context(), req.EventID, req.SeatIDs, a.holdTTL, key)
 	if errors.Is(err, ErrSeatsGone) {
 		// 409, not 500. Losing a race is a normal outcome, and the SPA must show
 		// the user a refreshed map rather than an error page.
+		//
+		// A REPLAY WHOSE HOLD HAS SINCE EXPIRED ARRIVES HERE TOO, and gets the same
+		// 409. That is deliberate: the seats really are gone, and the recovery is
+		// the one the client already implements.
 		fail(w, http.StatusConflict, "one or more seats were just taken")
 		return
 	}
@@ -291,9 +305,13 @@ func (a *API) createHold(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// expires_at COMES FROM INVENTORY, not from this clock. A replayed hold
+	// expires when the ORIGINAL one does — a retry arriving thirty seconds later
+	// does not get thirty more seconds, and computing it here would quietly tell
+	// the client that it did.
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"hold_id":    holdID,
-		"expires_at": time.Now().Add(a.holdTTL),
+		"expires_at": expiresAt,
 	})
 }
 
@@ -316,7 +334,25 @@ type orderRequest struct {
 	AmountMinor int64     `json:"amount_minor"`
 }
 
+// createOrder places the order for a hold. ALREADY SAFE TO RETRY, and not because
+// of the header.
+//
+// orders.orders.hold_id is UNIQUE and Create is an upsert on it, so a second
+// attempt for the same hold returns the SAME order id and its current state
+// rather than starting a second purchase; the saga behind it is written to be
+// re-entrant because the resumer calls it that way after a crash. THE HOLD ID IS
+// THE IDEMPOTENCY KEY, and it is a better one than a header because the client
+// cannot forget to send it or vary it between tries.
+//
+// The header is still accepted and validated, so that a client can send one
+// uniformly on every mutating call without having to know which endpoints need
+// it. Storing it as well would put a second key on the same fact, and two keys
+// that can disagree about whether this is the same request is worse than one.
 func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
+	if _, ok := idempotencyKey(w, r); !ok {
+		return
+	}
+
 	var req orderRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.AmountMinor <= 0 {
 		fail(w, http.StatusBadRequest, "hold_id, event_id, user_id and amount_minor are required")
@@ -347,6 +383,51 @@ func (a *API) getOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"order_id": id, "state": status})
+}
+
+// IdempotencyHeader is what a client sends to make a mutating call safe to retry.
+// The name is the de facto standard one, so a client library that already knows
+// about idempotency keys needs no configuration.
+const IdempotencyHeader = "Idempotency-Key"
+
+// maxIdempotencyKey bounds what a stranger can write into inventory.holds. The
+// key is stored and uniquely indexed on the most contended table in the system,
+// so an unbounded header value is an unbounded write into it.
+const maxIdempotencyKey = 128
+
+// idempotencyKey reads and validates the header, writing the error itself and
+// reporting false when the request must not proceed.
+//
+// AN UNUSABLE KEY IS A 400, NOT A SHRUG. Quietly ignoring a key that cannot be
+// stored would leave the client believing its retries are safe when they are
+// not — and the entire value of the header is the promise it makes. Failing the
+// request is the only answer that does not lie.
+//
+// THE HEADER IS OPTIONAL, deliberately. Requiring it would 400 every client not
+// yet taught to send one, while the safety it buys only exists for a client that
+// actually retries. Everything in this repo sends one; the day something outside
+// it does not, it should degrade rather than break.
+func idempotencyKey(w http.ResponseWriter, r *http.Request) (string, bool) {
+	key := strings.TrimSpace(r.Header.Get(IdempotencyHeader))
+	if key == "" {
+		return "", true
+	}
+	if len(key) > maxIdempotencyKey {
+		fail(w, http.StatusBadRequest, "Idempotency-Key must be at most 128 characters")
+		return "", false
+	}
+	// Conservative on purpose. A uuid, an order id or a hyphenated slug all pass;
+	// anything that would need escaping somewhere downstream does not.
+	for _, c := range key {
+		ok := c == '-' || c == '_' || c == '.' || c == ':' ||
+			(c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+		if !ok {
+			fail(w, http.StatusBadRequest,
+				"Idempotency-Key may contain only letters, digits and - _ . :")
+			return "", false
+		}
+	}
+	return key, true
 }
 
 func pathUUID(w http.ResponseWriter, r *http.Request, name string) (uuid.UUID, bool) {

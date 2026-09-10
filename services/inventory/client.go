@@ -26,19 +26,27 @@ func NewClient(cc grpc.ClientConnInterface) *Client {
 	return &Client{c: pb.NewInventoryServiceClient(cc)}
 }
 
-func (c *Client) Hold(ctx context.Context, eventID uuid.UUID, seatIDs []uuid.UUID, ttl time.Duration) (uuid.UUID, error) {
+// Hold claims seats. idempotencyKey may be empty; when it is not, a repeat of the
+// same call returns the ORIGINAL hold and its ORIGINAL expiry rather than
+// claiming again. See the note on HoldRequest in the proto.
+func (c *Client) Hold(ctx context.Context, eventID uuid.UUID, seatIDs []uuid.UUID, ttl time.Duration, idempotencyKey string) (uuid.UUID, time.Time, error) {
 	resp, err := c.c.Hold(ctx, &pb.HoldRequest{
-		EventId: eventID.String(),
-		SeatIds: uuidStrings(seatIDs),
-		Ttl:     durationpb.New(ttl),
+		EventId:        eventID.String(),
+		SeatIds:        uuidStrings(seatIDs),
+		Ttl:            durationpb.New(ttl),
+		IdempotencyKey: idempotencyKey,
 	})
 	if status.Code(err) == codes.Aborted {
-		return uuid.Nil, store.ErrSeatsUnavailable
+		return uuid.Nil, time.Time{}, store.ErrSeatsUnavailable
 	}
 	if err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, time.Time{}, err
 	}
-	return uuid.Parse(resp.GetHoldId())
+	id, err := uuid.Parse(resp.GetHoldId())
+	if err != nil {
+		return uuid.Nil, time.Time{}, err
+	}
+	return id, resp.GetExpiresAt().AsTime(), nil
 }
 
 func (c *Client) Release(ctx context.Context, holdID uuid.UUID, reason string) error {

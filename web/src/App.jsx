@@ -156,23 +156,46 @@ export default function App() {
     setPicked((p) => (p.includes(seat.id) ? p.filter((x) => x !== seat.id) : [...p, seat.id]))
   }, [])
 
+  // THE KEY FOR THE NEXT HOLD ATTEMPT, held in a ref so it survives a re-render
+  // but does not cause one.
+  //
+  // It is minted per ATTEMPT and cleared only once the attempt has resolved, so
+  // that a user who double-clicks Hold — or reloads at exactly the wrong moment
+  // and clicks again — gets back the hold they already have rather than being
+  // told the seats they just won were taken by someone else. A fresh key per
+  // click would be no key at all.
+  const holdKey = useRef(null)
+
   async function holdSeats() {
     if (!picked.length || busy.current) return
     busy.current = true
     setMsg(null)
+    if (!holdKey.current) {
+      holdKey.current =
+        globalThis.crypto?.randomUUID?.() ??
+        `hold-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e10).toString(36)}`
+    }
     try {
       const res = await fetchWithID('/api/holds', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': holdKey.current,
+        },
         body: JSON.stringify({ event_id: event.id, seat_ids: picked }),
       })
       if (res.status === 409) {
+        // The attempt is OVER, and the next one is for different seats — so the
+        // key is retired here. Reusing it would ask the server to replay a hold
+        // that never existed, or worse, one for the seats just abandoned.
+        holdKey.current = null
         setMsg({ kind: 'err', text: 'Someone just took one of those. Pick again.' })
         setPicked([])
         await refresh()
         return
       }
       if (!res.ok) throw new Error(`hold failed (${res.status})`)
+      holdKey.current = null
       const body = await res.json()
       setHold(body.hold_id)
       setExpiresAt(new Date(body.expires_at).getTime())
@@ -190,9 +213,12 @@ export default function App() {
     busy.current = true
     setMsg(null)
     try {
+      // THE HOLD ID IS THE KEY. Orders is idempotent on it in the database, so
+      // sending it as the header costs nothing and makes every mutating call the
+      // page issues carry one.
       const body = await apiJSON('/api/orders', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': hold },
         body: JSON.stringify({
           hold_id: hold,
           event_id: event.id,

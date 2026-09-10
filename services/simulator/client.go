@@ -56,11 +56,20 @@ func (s *Simulator) seats(ctx context.Context, eventID, sectionID string) ([]sea
 	return body.Seats, err
 }
 
+// idempotencyHeader is spelled out rather than imported from the gateway package.
+// This client is an OUTSIDE caller of that API — it hardcodes the paths for the
+// same reason — and pulling the gateway's whole package in for one string would
+// link its hub and SSE machinery into the load generator.
+const idempotencyHeader = "Idempotency-Key"
+
+// hold claims seats. THE KEY IS MINTED PER ATTEMPT, not per retry — this is the
+// load generator, so it is also the thing most likely to expose a key that varies
+// between tries and therefore is not a key at all.
 func (s *Simulator) hold(ctx context.Context, eventID string, seatIDs []string) (string, error) {
 	var body struct {
 		HoldID string `json:"hold_id"`
 	}
-	code, err := s.postJSON(ctx, "/api/holds", map[string]any{
+	code, err := s.postJSON(ctx, "/api/holds", newUUID(), map[string]any{
 		"event_id": eventID, "seat_ids": seatIDs,
 	}, &body)
 	if err != nil {
@@ -79,7 +88,10 @@ func (s *Simulator) order(ctx context.Context, holdID, eventID string, amountMin
 	var body struct {
 		State string `json:"state"`
 	}
-	code, err := s.postJSON(ctx, "/api/orders", map[string]any{
+	// The hold id IS the key here — orders is idempotent on it in the database —
+	// and sending it as the header too keeps every mutating call in this client
+	// uniform rather than making the caller remember which endpoint is which.
+	code, err := s.postJSON(ctx, "/api/orders", holdID, map[string]any{
 		"hold_id": holdID, "event_id": eventID,
 		"user_id": newUUID(), "amount_minor": amountMinor,
 	}, &body)
@@ -125,7 +137,8 @@ func (s *Simulator) getJSON(ctx context.Context, path string, into any) error {
 	return json.NewDecoder(resp.Body).Decode(into)
 }
 
-func (s *Simulator) postJSON(ctx context.Context, path string, body, into any) (int, error) {
+// postJSON posts body and decodes into. idempotencyKey may be empty.
+func (s *Simulator) postJSON(ctx context.Context, path, idempotencyKey string, body, into any) (int, error) {
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return 0, err
@@ -135,6 +148,9 @@ func (s *Simulator) postJSON(ctx context.Context, path string, body, into any) (
 		return 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if idempotencyKey != "" {
+		req.Header.Set(idempotencyHeader, idempotencyKey)
+	}
 	setCustomer(ctx, req)
 
 	resp, err := s.http.Do(req)

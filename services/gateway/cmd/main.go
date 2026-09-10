@@ -62,10 +62,12 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// I need to figure this one out exactly
 	shutdownObs, logProvider, err := obs.Setup(ctx, service, version, otlp)
 	if err != nil {
 		return fmt.Errorf("observability: %w", err)
 	}
+
 	lg, flush := logger.MustNew(service, debug, logProvider)
 	defer func() { _ = flush() }()
 
