@@ -131,7 +131,7 @@ func access(lg *zap.Logger, route string, h http.HandlerFunc) http.Handler {
 		// WHO is doing this. Seeded here at the only door into the system, and
 		// carried onward as baggage so every downstream service can tag its own
 		// spans without any of them taking a customer id as a parameter.
-		r = r.WithContext(WithCustomer(r.Context(), r))
+		r = r.WithContext(WithClientTags(r.Context(), r))
 
 		h(rec, r)
 
@@ -159,6 +159,7 @@ func access(lg *zap.Logger, route string, h http.HandlerFunc) http.Handler {
 			zap.Int("status", rec.status),
 			zap.Duration("took", time.Since(start)),
 			CustomerField(r.Context()),
+			ProfileField(r.Context()),
 		)
 	})
 }

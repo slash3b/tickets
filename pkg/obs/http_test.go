@@ -102,3 +102,38 @@ func TestAccessLogLevelsByFault(t *testing.T) {
 		})
 	}
 }
+
+// TestAccessLogCarriesTheProfile closes the loop the baggage test opens: it is
+// not enough for the profile to be in the context, it has to land on the line.
+//
+// The question this exists to answer is "show me every request a picky buyer
+// made", which before this was a prefix match on customer_id.
+func TestAccessLogCarriesTheProfile(t *testing.T) {
+	otel.SetTracerProvider(sdktrace.NewTracerProvider())
+
+	core, logs := observer.New(zapcore.InfoLevel)
+	mux := http.NewServeMux()
+	obs.Route(mux, zap.New(core), "GET /x", func(w http.ResponseWriter, _ *http.Request) {})
+
+	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	req.Header.Set(obs.CustomerHeader, "sim-picky-1a2b3c4d")
+	req.Header.Set(obs.ProfileHeader, "picky")
+	mux.ServeHTTP(httptest.NewRecorder(), req)
+
+	fields := logs.All()[0].ContextMap()
+	if fields["buyer_profile"] != "picky" {
+		t.Errorf("buyer_profile = %v, want picky (fields: %v)", fields["buyer_profile"], fields)
+	}
+	if fields["customer_id"] != "sim-picky-1a2b3c4d" {
+		t.Errorf("customer_id = %v, want the header value", fields["customer_id"])
+	}
+
+	// A browser sends no profile, and the field must be absent rather than "".
+	core2, logs2 := observer.New(zapcore.InfoLevel)
+	mux2 := http.NewServeMux()
+	obs.Route(mux2, zap.New(core2), "GET /x", func(w http.ResponseWriter, _ *http.Request) {})
+	mux2.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/x", nil))
+	if _, present := logs2.All()[0].ContextMap()["buyer_profile"]; present {
+		t.Errorf("buyer_profile present on a request that sent none")
+	}
+}
