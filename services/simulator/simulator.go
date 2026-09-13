@@ -176,6 +176,11 @@ func (s *Simulator) SetConfig(cfg Config) {
 // the wire as the same header a browser sends.
 type customerKey struct{}
 
+// profileKey carries WHAT KIND of buyer this is down to the same helpers, so the
+// profile crosses the wire as a header rather than being recoverable only by
+// taking the customer id apart.
+type profileKey struct{}
+
 // burstKey carries the rehearsal's span context so a session can LINK to it
 // without becoming part of its trace.
 type burstKey struct{}
@@ -284,6 +289,7 @@ func (s *Simulator) RunOne(ctx context.Context, profile Profile) {
 	// nothing connects.
 	customer := "sim-" + string(profile) + "-" + newUUID()[:8]
 	ctx = context.WithValue(ctx, customerKey{}, customer)
+	ctx = context.WithValue(ctx, profileKey{}, string(profile))
 
 	ctx, span := tracer.Start(ctx, "session "+string(profile), opts...)
 	defer span.End()

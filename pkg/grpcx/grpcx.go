@@ -137,7 +137,7 @@ func accessLog(lg *zap.Logger) grpc.UnaryServerInterceptor {
 		// carried baggage since the first commit. This puts it on THIS service's
 		// span, so "everything customer X did" is one filter across all of them
 		// rather than a trace-by-trace hunt.
-		obs.TagCustomer(ctx)
+		obs.TagClient(ctx)
 
 		log := logger.Ctx(ctx, lg).Info
 		if isFault(code) {
@@ -164,6 +164,7 @@ func accessLog(lg *zap.Logger) grpc.UnaryServerInterceptor {
 			zap.Duration("took", time.Since(start)),
 			errText,
 			obs.CustomerField(ctx),
+			obs.ProfileField(ctx),
 		)
 		return resp, err
 	}

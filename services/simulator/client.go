@@ -173,7 +173,7 @@ func drain(resp *http.Response) {
 	_ = resp.Body.Close()
 }
 
-// setCustomer puts this buyer's id on the request.
+// setCustomer puts this buyer's id and profile on the request.
 //
 // It is the same header a browser sends, so a simulated buyer and a real one are
 // indistinguishable to everything downstream — which is the point. A load
@@ -181,5 +181,8 @@ func drain(resp *http.Response) {
 func setCustomer(ctx context.Context, req *http.Request) {
 	if id, ok := ctx.Value(customerKey{}).(string); ok && id != "" {
 		req.Header.Set(obs.CustomerHeader, id)
+	}
+	if p, ok := ctx.Value(profileKey{}).(string); ok && p != "" {
+		req.Header.Set(obs.ProfileHeader, p)
 	}
 }

@@ -289,6 +289,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/CustomerID'
+        - $ref: '#/components/parameters/BuyerProfile'
       requestBody:
         required: true
         content:
@@ -355,6 +356,7 @@ paths:
           description: Hold id.
           schema: { type: string, format: uuid }
         - $ref: '#/components/parameters/CustomerID'
+        - $ref: '#/components/parameters/BuyerProfile'
       responses:
         '204':
           description: Released. No body.
@@ -386,6 +388,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/CustomerID'
+        - $ref: '#/components/parameters/BuyerProfile'
       requestBody:
         required: true
         content:
@@ -433,6 +436,7 @@ paths:
           description: Order id.
           schema: { type: string, format: uuid }
         - $ref: '#/components/parameters/CustomerID'
+        - $ref: '#/components/parameters/BuyerProfile'
       responses:
         '200':
           description: The order's current state.
@@ -542,6 +546,26 @@ components:
         type: string
         maxLength: 128
         pattern: '^[A-Za-z0-9._:-]+$'
+
+    BuyerProfile:
+      name: X-Buyer-Profile
+      in: header
+      required: false
+      description: |
+        WHAT KIND of buyer this is, not who. The simulator sends one of `browser`,
+        `decisive`, `picky`, `group` or `abandoner`; a real browser sends nothing and the
+        field is then absent rather than empty.
+
+        It rides baggage exactly as `X-Customer-Id` does, and is sanitised by the same
+        rules for the same reason. In SigNoz, filter spans on `buyer.profile` and logs on
+        `buyer_profile`.
+
+        It exists because the profile was previously recoverable only by prefix-matching
+        the customer id, which the simulator writes as `sim-<profile>-<8 hex>`. That made
+        "every picky buyer" a LIKE over a composite string, and would break outright the
+        day a profile name contains a dash.
+      schema: { type: string, maxLength: 64 }
+      example: picky
 
     CustomerID:
       name: X-Customer-Id
