@@ -1,5 +1,5 @@
 HOMELAB KUBERNETES - STATE OF THE CLUSTER
-Snapshot 2026-09-10, taken from k8s-ctrl-plane (192.168.1.116).
+Snapshot 2026-09-18, taken from k8s-ctrl-plane (192.168.1.116).
 Changes made 2026-08-23/24: cineplex removed, slash3b account added, Argo CD 3.0.6 -> 3.5.1.
 2026-08-24: CLEAN SLATE. All observability leftovers deleted - 2 PVCs, 13 CRDs, 4 empty
 namespaces, 3 helm repos, stale images on every node. Disk 83/50/43% -> 47/29/16%, ~30G
@@ -11,6 +11,11 @@ and were wrong. Three findings worth reading: the control plane is NO LONGER TAI
 now runs more pods than either worker; Postgres and all three Kafka brokers are pinned by
 local-path volumes to k8s-node-1, making it a single point of failure for the whole data
 plane; the platform is 15 Argo Applications, not 4.
+2026-09-18: workstation can now drive the cluster directly - kubeconfig copied to
+~/.kube/config, context `homelab`, `kubectl get nodes` verified. Two ACCESS claims were
+stale and are corrected: SSH key auth from the workstation WORKS, and the kubeconfig is
+no longer control-plane-only. The API server cert SANs are now recorded there too,
+because they are what constrains every off-LAN access plan. See ACCESS.
 2026-08-27: control-plane DNS fixed at the root, not patched again. resolv.conf now
 points at the systemd-resolved STUB, which makes tailscaled pick its resolvedManager
 and stop wanting the file; resolv-guard.path restores the symlink if anything takes it
@@ -22,10 +27,27 @@ ACCESS
 
   SSH control plane   ssh slash3b@192.168.1.116        (user slash3b, sudo NOPASSWD)
   API server          https://192.168.1.116:6443
-  kubeconfig          ~/.kube/config on the control plane only, not on the workstation.
-                      To drive the cluster from the laptop:
-                        scp slash3b@192.168.1.116:~/.kube/config ~/.kube/homelab
-                        export KUBECONFIG=~/.kube/homelab
+  kubeconfig          on the control plane at ~/.kube/config, and since 2026-09-18 also
+                      on the workstation at ~/.kube/config, context renamed to `homelab`
+                      so plain `kubectl` works with no KUBECONFIG export:
+                        scp slash3b@192.168.1.116:~/.kube/config ~/.kube/config
+                        kubectl config rename-context kubernetes-admin@kubernetes homelab
+                      It is the kubeadm admin credential - cluster-admin, a client cert
+                      valid to 2027-08-23, and kubeadm has no CRL, so it cannot be revoked
+                      short of rotating the CA. Treat the file as a root password.
+  kubectl versions    workstation client v1.35.5 against server v1.36.4. One minor behind,
+                      inside the supported +/-1 skew.
+  API server SANs     DNS k8s-ctrl-plane, kubernetes, kubernetes.default,
+                      kubernetes.default.svc, kubernetes.default.svc.cluster.local
+                      IP  10.96.0.1, 192.168.1.116
+                      THERE IS NO TAILNET NAME AND NO PUBLIC IP IN THE CERT. Anything that
+                      reaches the API from off-LAN must therefore make 192.168.1.116 itself
+                      routable - a subnet router, not a reverse proxy on another address -
+                      or the cert has to be reissued with the new name:
+                        kubeadm init phase certs apiserver --apiserver-cert-extra-sans=...
+                      Read them back with
+                        sudo openssl x509 -in /etc/kubernetes/pki/apiserver.crt -noout -text \
+                          | grep -A2 'Subject Alternative Name'
   NodePort range      30000-32767 (default)
 
   WORKER HOST KEYS - verified and repaired 2026-08-24.
@@ -74,9 +96,14 @@ ACCESS
        (see CONTROL PLANE DNS). Stale entry removed with `ssh-keygen -R 192.168.1.116`
        and the verified ED25519 key added. ssh keeps the old file as known_hosts.old.
 
-    2. NO AUTHORIZED KEY on this workstation. The key
+    2. AUTHORIZED KEY - RESOLVED 2026-09-18, the paragraph below is kept for the
+       diagnosis but no longer describes the state. `ssh -o BatchMode=yes
+       slash3b@192.168.1.116` now succeeds from the workstation, so key auth works and
+       nothing here needs a password any more. What follows was true until then.
+
+       The key
          ssh-ed25519 ... slash3b@gmail.com  SHA256:kx9PExloGZnwnOmcXF14oGZo8ddtXRKNxVLyeP2eJWQ
-       is offered and rejected - it is not in ~slash3b/.ssh/authorized_keys on .116. The
+       was offered and rejected - it was not in ~slash3b/.ssh/authorized_keys on .116. The
        control plane's OWN key (gcgPtrJ4...) is the one recorded above as installed on the
        workers; the workstation's was never installed here, or was lost with the rebuild.
        Install it once, which needs the account password that one time:
